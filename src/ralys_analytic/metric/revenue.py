@@ -47,3 +47,59 @@ def annualRevenue(data):
 
 def getLatestRevenue(data):
     return data[-1][1]
+
+
+def getRevenueGrowth(data, days=30):
+    """
+    Calculate revenue growth rate over a specified number of days.
+
+    Args:
+        data: List of [timestamp, revenue] pairs
+        days: Number of days to calculate growth over (30 or 90)
+
+    Returns:
+        Growth rate as a percentage, or None if insufficient data
+    """
+    if not data or len(data) < 2:
+        return None
+
+    # Sort by timestamp
+    sorted_data = sorted(data, key=lambda x: x[0])
+
+    # Get the latest timestamp
+    latest_ts = sorted_data[-1][0]
+    target_ts = latest_ts - (days * 24 * 60 * 60)
+
+    # Find the data point closest to target_ts
+    past_revenue = None
+    for item in sorted_data:
+        if item[0] <= target_ts:
+            past_revenue = item[1]
+        else:
+            break
+
+    if past_revenue is None or past_revenue == 0:
+        # Try to get the earliest available data point
+        if len(sorted_data) > 1:
+            past_revenue = sorted_data[0][1]
+        else:
+            return None
+
+    # Calculate cumulative revenue for the periods
+    # Sum revenue for the last N days
+    current_period_revenue = sum(
+        item[1] for item in sorted_data
+        if item[0] > latest_ts - (days * 24 * 60 * 60)
+    )
+
+    # Sum revenue for the previous N days
+    previous_period_revenue = sum(
+        item[1] for item in sorted_data
+        if latest_ts - (2 * days * 24 * 60 * 60) < item[0] <= latest_ts - (days * 24 * 60 * 60)
+    )
+
+    if previous_period_revenue == 0:
+        return None
+
+    growth_rate = ((current_period_revenue - previous_period_revenue) / previous_period_revenue) * 100
+    return growth_rate
