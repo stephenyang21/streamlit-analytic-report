@@ -256,13 +256,13 @@ def load_data():
 
     # Metadata: (name, display_name, token_supply, circulating_token, coingecko_id, type, revenue_override)
     metadata = [
-        ("zksync_era", "zkSync Era", 21_000_000_000, 8_620_000_000, "zksync", "protocol", None),
-        ("plume_mainnet", "Plume Mainnet", 10_000_000_000, 4_800_000_000, "plume", "protocol", None),
-        ("avalanche", "Avalanche", 715_740_000, 431_720_000, "avalanche-2", "protocol", None),
-        ("ondo_finance", "Ondo Finance", 10_000_000_000, 4_860_000_000, "ondo-finance", "protocol", None),
-        ("ondo_yield_assets", "Ondo Yield Assets", 1_250_000_000, 628_940_000, "ondo-us-dollar-yield", "protocol", None),
+        ("zksync_era", "zkSync Era", 21_000_000_000, 8_620_000_000,"zksync", "protocol", None),
+        ("plume_mainnet", "Plume Mainnet", 10_000_000_000, 4_800_000_000,"plume", "protocol", None),
+        ("avalanche", "Avalanche", 715_740_000, 431_720_000,"avalanche-2", "protocol", None),
+        ("ondo_finance", "Ondo Finance", 10_000_000_000,4_860_000_000, "ondo-finance", "protocol", None),
+        ("ondo_yield_assets", "Ondo Yield Assets", 1_250_000_000, 628_940_000,"ondo-us-dollar-yield", "protocol", None),
         ("polygon", "Polygon", 10_000_000_000, 1_910_000_000, "polygon-ecosystem-token", "chain", None),
-        ("rayls", "Rayls (RLS)", 10_000_000_000, 1_500_000_000, "rls", "protocol", 2_000_000),
+        ("rayls", "Rayls (RLS)", 10_000_000_000, 1_500_000_000,"rls", "protocol", 2_000_000),
     ]
 
     def get_2025_revenue(revenue_data):
@@ -272,7 +272,7 @@ def load_data():
                 return total
         return None
 
-    # Fetch CoinGecko prices for non-Rayls tokens
+    # Fetch CoinMarketCap prices for non-Rayls tokens
     coingecko_ids = [item[4] for item in metadata if item[4] != "rls"]
     price_data_batch = price.getCoingeckoPricesBatch(coingecko_ids)
 
@@ -298,7 +298,7 @@ def load_data():
     results = []
 
     for item in metadata:
-        _, display_name, token_supply, circulating_token, coingecko_id, item_type, revenue_override = item
+        _, display_name, token_supply,circulating_supply, coingecko_id, item_type, revenue_override = item
 
         try:
             price_data = price_data_batch.get(coingecko_id, {})
@@ -327,17 +327,12 @@ def load_data():
 
             multiplier = fdv / revenue_2025 if fdv and revenue_2025 and revenue_2025 > 0 else None
 
-            # Calculate circulating market cap
-            circulating_market_cap = current_price * circulating_token if current_price else None
-
             results.append({
                 "Project": display_name,
                 "Current Price ($)": current_price,
                 "Token Supply": token_supply,
-                "Circulating Supply": circulating_token,
                 "FDV ($)": fdv,
                 "Market Cap ($)": market_cap,
-                "Circulating Market Cap ($)": circulating_market_cap,
                 "Revenue 2025 ($)": revenue_2025,
                 "Multiplier (FDV/Revenue)": multiplier,
                 "Revenue Growth 30d (%)": revenue_growth_30d,
@@ -351,10 +346,8 @@ def load_data():
                 "Project": display_name,
                 "Current Price ($)": None,
                 "Token Supply": token_supply,
-                "Circulating Supply": circulating_token,
                 "FDV ($)": None,
                 "Market Cap ($)": None,
-                "Circulating Market Cap ($)": None,
                 "Revenue 2025 ($)": None,
                 "Multiplier (FDV/Revenue)": None,
                 "Revenue Growth 30d (%)": None,
@@ -516,39 +509,6 @@ with tab1:
         }
     )
 
-    # Market Cap comparison table
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown('<div class="section-header">Market Cap Comparison</div>', unsafe_allow_html=True)
-
-    # Create market cap display dataframe
-    mcap_cols = ["Project", "Current Price ($)", "Circulating Supply", "Token Supply", "Circulating Market Cap ($)", "FDV ($)"]
-    mcap_df = df[mcap_cols].copy()
-    mcap_df["Current Price ($)"] = df["Current Price ($)"].apply(lambda x: f"${x:,.6f}" if x and not pd.isna(x) else "N/A")
-    mcap_df["Circulating Supply"] = df["Circulating Supply"].apply(format_supply)
-    mcap_df["Token Supply"] = df["Token Supply"].apply(format_supply)
-    mcap_df["Circulating Market Cap ($)"] = df["Circulating Market Cap ($)"].apply(format_currency)
-    mcap_df["FDV ($)"] = df["FDV ($)"].apply(format_currency)
-
-    # Sort by circulating market cap descending
-    mcap_df_sorted = mcap_df.copy()
-    mcap_df_sorted["_sort_key"] = df["Circulating Market Cap ($)"]
-    mcap_df_sorted = mcap_df_sorted.sort_values("_sort_key", ascending=False).drop(columns=["_sort_key"])
-
-    st.dataframe(
-        mcap_df_sorted,
-        use_container_width=True,
-        hide_index=True,
-        height=320,
-        column_config={
-            "Project": st.column_config.TextColumn("Project", width="medium"),
-            "Current Price ($)": st.column_config.TextColumn("Price", width="small"),
-            "Circulating Supply": st.column_config.TextColumn("Circ. Supply", width="small"),
-            "Token Supply": st.column_config.TextColumn("Total Supply", width="small"),
-            "Circulating Market Cap ($)": st.column_config.TextColumn("Circ. Market Cap", width="medium"),
-            "FDV ($)": st.column_config.TextColumn("FDV", width="small"),
-        }
-    )
-
     # Summary metrics
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown('<div class="section-header">Valuation Metrics Summary</div>', unsafe_allow_html=True)
@@ -678,6 +638,829 @@ with tab2:
 
 # Tab 3: Valuation Analysis
 with tab3:
+    # ==========================================
+    # UNDERVALUATION ANALYSIS SECTION
+    # ==========================================
+    st.markdown('<div class="section-header">🎯 Rayls Undervaluation Analysis</div>', unsafe_allow_html=True)
+    st.markdown("""
+    This analysis compares Rayls' valuation multiple (FDV/Revenue) against peer protocols.
+    A **lower multiple** indicates the token is **cheaper** relative to its revenue generation.
+    """)
+
+    # Prepare data for undervaluation chart
+    valuation_data = df[df["Multiplier (FDV/Revenue)"].notna()].copy()
+    valuation_data = valuation_data.sort_values("Multiplier (FDV/Revenue)", ascending=True)
+
+    if len(valuation_data) > 0:
+        # Calculate peer average (excluding Rayls)
+        peers_only = valuation_data[valuation_data["Project"] != "Rayls (RLS)"]
+        peer_avg_multiple = peers_only["Multiplier (FDV/Revenue)"].mean()
+        peer_median_multiple = peers_only["Multiplier (FDV/Revenue)"].median()
+
+        # Get Rayls data
+        rayls_valuation = valuation_data[valuation_data["Project"] == "Rayls (RLS)"]
+
+        if len(rayls_valuation) > 0:
+            rayls_mult = rayls_valuation["Multiplier (FDV/Revenue)"].values[0]
+            rayls_fdv = rayls_valuation["FDV ($)"].values[0]
+            rayls_revenue = rayls_valuation["Revenue 2025 ($)"].values[0]
+
+            # Calculate discount/premium vs peers
+            discount_vs_avg = ((peer_avg_multiple - rayls_mult) / peer_avg_multiple) * 100
+            discount_vs_median = ((peer_median_multiple - rayls_mult) / peer_median_multiple) * 100
+
+            # Calculate implied fair value at peer multiples
+            implied_fdv_at_avg = rayls_revenue * peer_avg_multiple if rayls_revenue else None
+            implied_fdv_at_median = rayls_revenue * peer_median_multiple if rayls_revenue else None
+            upside_at_avg = ((implied_fdv_at_avg - rayls_fdv) / rayls_fdv * 100) if implied_fdv_at_avg and rayls_fdv else None
+            upside_at_median = ((implied_fdv_at_median - rayls_fdv) / rayls_fdv * 100) if implied_fdv_at_median and rayls_fdv else None
+
+            # Key metrics row
+            col1, col2, col3, col4 = st.columns(4)
+
+            with col1:
+                st.metric(
+                    "Rayls Multiple",
+                    f"{rayls_mult:,.1f}x",
+                    help="FDV divided by 2025 Revenue"
+                )
+
+            with col2:
+                st.metric(
+                    "Peer Average",
+                    f"{peer_avg_multiple:,.1f}x",
+                    delta=f"{discount_vs_avg:+.1f}% discount" if discount_vs_avg > 0 else f"{-discount_vs_avg:.1f}% premium",
+                    delta_color="normal" if discount_vs_avg > 0 else "inverse"
+                )
+
+            with col3:
+                st.metric(
+                    "Implied FDV (at Avg)",
+                    format_currency(implied_fdv_at_avg),
+                    delta=f"{upside_at_avg:+.1f}% upside" if upside_at_avg else None,
+                    delta_color="normal" if upside_at_avg and upside_at_avg > 0 else "off"
+                )
+
+            with col4:
+                st.metric(
+                    "Current FDV",
+                    format_currency(rayls_fdv),
+                    help="Current fully diluted valuation"
+                )
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # Horizontal bar chart - FDV/Revenue Multiple Comparison
+            # Color Rayls differently
+            valuation_data["Color"] = valuation_data["Project"].apply(
+                lambda x: "Rayls (RLS)" if x == "Rayls (RLS)" else "Peers"
+            )
+
+            fig_bar = px.bar(
+                valuation_data,
+                y="Project",
+                x="Multiplier (FDV/Revenue)",
+                orientation="h",
+                color="Color",
+                color_discrete_map={"Rayls (RLS)": "#4299e1", "Peers": "#64748b"},
+                hover_data={
+                    "Multiplier (FDV/Revenue)": ":.2f",
+                    "FDV ($)": ":,.0f",
+                    "Revenue 2025 ($)": ":,.0f",
+                    "Color": False
+                },
+            )
+
+            # Add peer average line
+            fig_bar.add_vline(
+                x=peer_avg_multiple,
+                line_dash="dash",
+                line_color="#f97316",
+                line_width=3,
+                annotation_text=f"Peer Avg: {peer_avg_multiple:.1f}x",
+                annotation_position="top",
+                annotation_font_color="#f97316"
+            )
+
+            # Add peer median line
+            fig_bar.add_vline(
+                x=peer_median_multiple,
+                line_dash="dot",
+                line_color="#22c55e",
+                line_width=2,
+                annotation_text=f"Peer Median: {peer_median_multiple:.1f}x",
+                annotation_position="bottom",
+                annotation_font_color="#22c55e"
+            )
+
+            fig_bar.update_layout(
+                title=dict(
+                    text="FDV/Revenue Multiple Comparison (Lower = Cheaper)",
+                    font=dict(size=18)
+                ),
+                xaxis_title="FDV/Revenue Multiple (x)",
+                yaxis_title="",
+                height=400,
+                showlegend=True,
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="right",
+                    x=1,
+                    title=""
+                ),
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+                bargap=0.3,
+            )
+
+            fig_bar.update_xaxes(
+                showgrid=True,
+                gridwidth=1,
+                gridcolor="rgba(128,128,128,0.2)",
+            )
+
+            st.plotly_chart(fig_bar, use_container_width=True)
+
+            # Bullet Chart - Rayls Multiple vs Peer Range
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown("#### 🎯 Bullet Chart: Rayls Valuation Position", unsafe_allow_html=True)
+            st.markdown("Shows where each project's multiple sits within the valuation spectrum. **Blue diamond = Rayls**, gray circles = peers.")
+
+            import plotly.graph_objects as go
+
+            # Calculate peer statistics
+            peer_min = peers_only["Multiplier (FDV/Revenue)"].min()
+            peer_max = peers_only["Multiplier (FDV/Revenue)"].max()
+            peer_25 = peers_only["Multiplier (FDV/Revenue)"].quantile(0.25)
+            peer_75 = peers_only["Multiplier (FDV/Revenue)"].quantile(0.75)
+
+            fig_bullet = go.Figure()
+
+            # Background ranges (from worst to best for undervaluation)
+            # Red zone: Above peer average (overvalued)
+            fig_bullet.add_trace(go.Bar(
+                x=[peer_max],
+                y=["Valuation Multiple"],
+                orientation='h',
+                marker=dict(color='rgba(239, 68, 68, 0.3)'),
+                name=f'Expensive Zone (>{peer_avg_multiple:.0f}x)',
+                hoverinfo='skip',
+                width=0.5
+            ))
+
+            # Yellow zone: Between median and average
+            fig_bullet.add_trace(go.Bar(
+                x=[peer_avg_multiple],
+                y=["Valuation Multiple"],
+                orientation='h',
+                marker=dict(color='rgba(251, 191, 36, 0.4)'),
+                name=f'Fair Value Zone ({peer_median_multiple:.0f}-{peer_avg_multiple:.0f}x)',
+                hoverinfo='skip',
+                width=0.5
+            ))
+
+            # Green zone: Below median (undervalued)
+            fig_bullet.add_trace(go.Bar(
+                x=[peer_median_multiple],
+                y=["Valuation Multiple"],
+                orientation='h',
+                marker=dict(color='rgba(34, 197, 94, 0.4)'),
+                name=f'Undervalued Zone (<{peer_median_multiple:.0f}x)',
+                hoverinfo='skip',
+                width=0.5
+            ))
+
+            # Add peer markers (circles)
+            peer_colors = ['#94a3b8', '#78716c', '#a1a1aa', '#9ca3af', '#a3a3a3', '#8b8b8b']
+            for idx, (_, peer_row) in enumerate(peers_only.iterrows()):
+                peer_name = peer_row["Project"]
+                peer_mult_val = peer_row["Multiplier (FDV/Revenue)"]
+                peer_color = peer_colors[idx % len(peer_colors)]
+
+                fig_bullet.add_trace(go.Scatter(
+                    x=[peer_mult_val],
+                    y=["Valuation Multiple"],
+                    mode='markers+text',
+                    marker=dict(
+                        symbol='circle',
+                        size=14,
+                        color=peer_color,
+                        line=dict(color='white', width=1)
+                    ),
+                    text=[peer_name.split()[0]],  # First word of name
+                    textposition="bottom center",
+                    textfont=dict(size=9, color=peer_color),
+                    name=f'{peer_name} ({peer_mult_val:.1f}x)',
+                    hovertemplate=f"<b>{peer_name}</b><br>Multiple: {peer_mult_val:.1f}x<extra></extra>",
+                    showlegend=False
+                ))
+
+            # Rayls marker (diamond shape using scatter) - larger and highlighted
+            fig_bullet.add_trace(go.Scatter(
+                x=[rayls_mult],
+                y=["Valuation Multiple"],
+                mode='markers+text',
+                marker=dict(
+                    symbol='diamond',
+                    size=24,
+                    color='#3b82f6',
+                    line=dict(color='white', width=3)
+                ),
+                text=[f"RLS: {rayls_mult:.1f}x"],
+                textposition="top center",
+                textfont=dict(size=14, color='#3b82f6', family='Arial Black'),
+                name=f'⭐ Rayls ({rayls_mult:.1f}x)',
+                hovertemplate=f"<b>Rayls (RLS)</b><br>Multiple: {rayls_mult:.1f}x<br>vs Peer Avg: {discount_vs_avg:+.1f}%<extra></extra>"
+            ))
+
+            # Add vertical lines for key reference points
+            fig_bullet.add_vline(
+                x=peer_avg_multiple,
+                line_dash="dash",
+                line_color="#f97316",
+                line_width=2,
+                annotation_text=f"Peer Avg: {peer_avg_multiple:.1f}x",
+                annotation_position="top",
+                annotation_font=dict(color="#f97316", size=11)
+            )
+
+            fig_bullet.add_vline(
+                x=peer_median_multiple,
+                line_dash="dot",
+                line_color="#22c55e",
+                line_width=2,
+                annotation_text=f"Peer Median: {peer_median_multiple:.1f}x",
+                annotation_position="bottom",
+                annotation_font=dict(color="#22c55e", size=11)
+            )
+
+            fig_bullet.update_layout(
+                title=dict(
+                    text="Rayls Multiple vs Peer Range",
+                    font=dict(size=18)
+                ),
+                xaxis_title="FDV/Revenue Multiple (x)",
+                yaxis_title="",
+                height=300,
+                barmode='overlay',
+                showlegend=True,
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.15,
+                    xanchor="center",
+                    x=0.5,
+                    font=dict(size=10)
+                ),
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+                xaxis=dict(
+                    range=[0, peer_max * 1.1],
+                    showgrid=True,
+                    gridwidth=1,
+                    gridcolor="rgba(128,128,128,0.2)",
+                ),
+                yaxis=dict(
+                    showticklabels=False
+                ),
+                margin=dict(l=20, r=20, t=80, b=40)
+            )
+
+            st.plotly_chart(fig_bullet, use_container_width=True)
+
+            # Add interpretation text
+            if rayls_mult < peer_median_multiple:
+                zone_text = "🟢 **Undervalued Zone** - Rayls trades below peer median"
+            elif rayls_mult < peer_avg_multiple:
+                zone_text = "🟡 **Fair Value Zone** - Rayls trades between median and average"
+            else:
+                zone_text = "🔴 **Premium Zone** - Rayls trades above peer average"
+
+            st.markdown(f"""
+            **Reading the Chart:**
+            - 🟢 Green zone: Below peer median (undervalued)
+            - 🟡 Yellow zone: Between median and average (fair value)
+            - 🔴 Red zone: Above peer average (expensive)
+
+            **Current Position:** {zone_text}
+            """)
+
+            # Discount/Premium Diverging Bar Chart
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown("#### 📉 Discount/Premium vs Peer Average", unsafe_allow_html=True)
+            st.markdown("Shows how each project's valuation compares to the peer average. **Green bars (left) = trading at discount**, **Red bars (right) = trading at premium**.")
+
+            # Calculate discount/premium for all projects
+            diverging_data = valuation_data.copy()
+            diverging_data["Discount/Premium (%)"] = diverging_data["Multiplier (FDV/Revenue)"].apply(
+                lambda x: ((x - peer_avg_multiple) / peer_avg_multiple) * 100
+            )
+            diverging_data = diverging_data.sort_values("Discount/Premium (%)", ascending=True)
+
+            # Create color based on discount (green) or premium (red)
+            diverging_data["Bar Color"] = diverging_data["Discount/Premium (%)"].apply(
+                lambda x: "#22c55e" if x < 0 else "#ef4444"
+            )
+
+            # Highlight Rayls
+            diverging_data["Is Rayls"] = diverging_data["Project"].apply(
+                lambda x: "⭐ " + x if x == "Rayls (RLS)" else x
+            )
+
+            fig_diverging = go.Figure()
+
+            for _, row in diverging_data.iterrows():
+                is_rayls = "Rayls" in row["Project"]
+                bar_color = "#3b82f6" if is_rayls else row["Bar Color"]
+                border_width = 3 if is_rayls else 1
+                border_color = "#1d4ed8" if is_rayls else "white"
+
+                fig_diverging.add_trace(go.Bar(
+                    x=[row["Discount/Premium (%)"]],
+                    y=[row["Is Rayls"]],
+                    orientation='h',
+                    marker=dict(
+                        color=bar_color,
+                        line=dict(color=border_color, width=border_width)
+                    ),
+                    text=[f"{row['Discount/Premium (%)']:+.1f}%"],
+                    textposition="outside",
+                    textfont=dict(
+                        size=12 if is_rayls else 10,
+                        color=bar_color,
+                        family="Arial Black" if is_rayls else "Arial"
+                    ),
+                    hovertemplate=(
+                        f"<b>{row['Project']}</b><br>"
+                        f"Multiple: {row['Multiplier (FDV/Revenue)']:.1f}x<br>"
+                        f"vs Peer Avg ({peer_avg_multiple:.1f}x): {row['Discount/Premium (%)']:+.1f}%<br>"
+                        f"FDV: ${row['FDV ($)']:,.0f}<extra></extra>"
+                    ),
+                    showlegend=False
+                ))
+
+            # Add zero line
+            fig_diverging.add_vline(
+                x=0,
+                line_color="#64748b",
+                line_width=2,
+                annotation_text="Peer Average",
+                annotation_position="top",
+                annotation_font=dict(color="#64748b", size=11)
+            )
+
+            fig_diverging.update_layout(
+                title=dict(
+                    text="Valuation Discount/Premium vs Peer Average Multiple",
+                    font=dict(size=18)
+                ),
+                xaxis_title="Discount (←) / Premium (→) %",
+                yaxis_title="",
+                height=350,
+                showlegend=False,
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+                xaxis=dict(
+                    showgrid=True,
+                    gridwidth=1,
+                    gridcolor="rgba(128,128,128,0.2)",
+                    zeroline=True,
+                    zerolinewidth=2,
+                    zerolinecolor="#64748b",
+                ),
+                yaxis=dict(
+                    showgrid=False,
+                ),
+                margin=dict(l=20, r=80, t=60, b=40)
+            )
+
+            st.plotly_chart(fig_diverging, use_container_width=True)
+
+            # Summary for diverging chart
+            rayls_discount = diverging_data[diverging_data["Project"] == "Rayls (RLS)"]["Discount/Premium (%)"].values[0]
+            num_cheaper = len(diverging_data[diverging_data["Discount/Premium (%)"] < rayls_discount])
+            num_total = len(diverging_data)
+
+            if rayls_discount < 0:
+                st.markdown(f"""
+                **Key Insight:** Rayls trades at a **{abs(rayls_discount):.1f}% discount** to peer average.
+                Only **{num_cheaper} out of {num_total}** projects trade at a larger discount.
+                """)
+            else:
+                st.markdown(f"""
+                **Key Insight:** Rayls trades at a **{rayls_discount:.1f}% premium** to peer average.
+                """)
+
+            # Implied Price Upside Chart
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown("#### 💰 Implied Price Upside", unsafe_allow_html=True)
+            st.markdown("Compares current RLS price to implied fair prices at different peer valuation multiples.")
+
+            # Get current Rayls price and token supply
+            rayls_current_price = rayls_valuation["Current Price ($)"].values[0]
+            rayls_token_supply = rayls_valuation["Token Supply"].values[0] if "Token Supply" in rayls_valuation.columns else 10_000_000_000
+
+            # Calculate implied prices at different multiples
+            if rayls_current_price and rayls_revenue and rayls_token_supply:
+                # Implied FDV = Revenue * Multiple, Implied Price = Implied FDV / Token Supply
+                implied_price_at_avg = (rayls_revenue * peer_avg_multiple) / rayls_token_supply
+                implied_price_at_median = (rayls_revenue * peer_median_multiple) / rayls_token_supply
+                implied_price_at_max = (rayls_revenue * peer_max) / rayls_token_supply
+
+                # Calculate upside percentages
+                upside_to_avg = ((implied_price_at_avg - rayls_current_price) / rayls_current_price) * 100
+                upside_to_median = ((implied_price_at_median - rayls_current_price) / rayls_current_price) * 100
+                upside_to_max = ((implied_price_at_max - rayls_current_price) / rayls_current_price) * 100
+
+                # Create price comparison data
+                price_scenarios = pd.DataFrame([
+                    {
+                        "Scenario": "Current Price",
+                        "Price": rayls_current_price,
+                        "Upside": 0,
+                        "Type": "Current",
+                        "Multiple": f"{rayls_mult:.1f}x"
+                    },
+                    {
+                        "Scenario": "At Peer Median",
+                        "Price": implied_price_at_median,
+                        "Upside": upside_to_median,
+                        "Type": "Implied",
+                        "Multiple": f"{peer_median_multiple:.1f}x"
+                    },
+                    {
+                        "Scenario": "At Peer Average",
+                        "Price": implied_price_at_avg,
+                        "Upside": upside_to_avg,
+                        "Type": "Implied",
+                        "Multiple": f"{peer_avg_multiple:.1f}x"
+                    },
+                    {
+                        "Scenario": "At Peer Maximum",
+                        "Price": implied_price_at_max,
+                        "Upside": upside_to_max,
+                        "Type": "Implied",
+                        "Multiple": f"{peer_max:.1f}x"
+                    },
+                ])
+
+                fig_price = go.Figure()
+
+                # Add bars for each scenario
+                colors = ["#3b82f6", "#22c55e", "#16a34a", "#15803d"]
+                for idx, row in price_scenarios.iterrows():
+                    fig_price.add_trace(go.Bar(
+                        x=[row["Scenario"]],
+                        y=[row["Price"]],
+                        marker=dict(
+                            color=colors[idx],
+                            line=dict(color="white", width=2)
+                        ),
+                        text=[f"${row['Price']:.6f}"],
+                        textposition="outside",
+                        textfont=dict(size=11),
+                        hovertemplate=(
+                            f"<b>{row['Scenario']}</b><br>"
+                            f"Price: ${row['Price']:.6f}<br>"
+                            f"Multiple: {row['Multiple']}<br>"
+                            f"Upside: {row['Upside']:+.1f}%<extra></extra>"
+                        ),
+                        showlegend=False
+                    ))
+
+                # Add upside percentage annotations
+                for idx, row in price_scenarios.iterrows():
+                    if row["Upside"] != 0:
+                        fig_price.add_annotation(
+                            x=row["Scenario"],
+                            y=row["Price"],
+                            text=f"+{row['Upside']:.0f}%",
+                            showarrow=False,
+                            yshift=35,
+                            font=dict(size=12, color="#16a34a", family="Arial Black")
+                        )
+
+                fig_price.update_layout(
+                    title=dict(
+                        text="RLS Price: Current vs Implied Fair Value Scenarios",
+                        font=dict(size=18)
+                    ),
+                    xaxis_title="",
+                    yaxis_title="Price (USD)",
+                    height=400,
+                    showlegend=False,
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    yaxis=dict(
+                        showgrid=True,
+                        gridwidth=1,
+                        gridcolor="rgba(128,128,128,0.2)",
+                        tickformat=".6f"
+                    ),
+                    margin=dict(l=20, r=20, t=60, b=40)
+                )
+
+                st.plotly_chart(fig_price, use_container_width=True)
+
+                # Price target summary table
+                col1, col2, col3 = st.columns(3)
+
+                with col1:
+                    st.metric(
+                        "Current Price",
+                        f"${rayls_current_price:.6f}",
+                        help=f"At {rayls_mult:.1f}x multiple"
+                    )
+
+                with col2:
+                    st.metric(
+                        "Target (Peer Avg)",
+                        f"${implied_price_at_avg:.6f}",
+                        delta=f"+{upside_to_avg:.1f}% upside",
+                        delta_color="normal"
+                    )
+
+                with col3:
+                    st.metric(
+                        "Target (Peer Max)",
+                        f"${implied_price_at_max:.6f}",
+                        delta=f"+{upside_to_max:.1f}% upside",
+                        delta_color="normal"
+                    )
+
+                st.markdown(f"""
+                **Price Implications:**
+                - If RLS traded at **peer average multiple ({peer_avg_multiple:.1f}x)**, price would be **${implied_price_at_avg:.6f}** (+{upside_to_avg:.0f}% upside)
+                - If RLS traded at **peer maximum multiple ({peer_max:.1f}x)**, price would be **${implied_price_at_max:.6f}** (+{upside_to_max:.0f}% upside)
+                """)
+
+            # Scatter Plot: FDV vs Revenue with Trend Line
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown("#### 📈 FDV vs Revenue: Fair Value Line", unsafe_allow_html=True)
+            st.markdown("Projects **below** the trend line are undervalued (lower FDV for their revenue). Projects **above** are overvalued.")
+
+            import numpy as np
+
+            # Prepare scatter data - need both FDV and Revenue
+            scatter_data = valuation_data[
+                (valuation_data["FDV ($)"].notna()) &
+                (valuation_data["Revenue 2025 ($)"].notna()) &
+                (valuation_data["Revenue 2025 ($)"] > 0)
+            ].copy()
+
+            if len(scatter_data) >= 2:
+                # Helper function to format values in M/B
+                def format_val_short(val):
+                    if val >= 1e9:
+                        return f"${val/1e9:.2f}B"
+                    elif val >= 1e6:
+                        return f"${val/1e6:.2f}M"
+                    elif val >= 1e3:
+                        return f"${val/1e3:.2f}K"
+                    else:
+                        return f"${val:,.0f}"
+
+                # Calculate trend line using linear regression
+                x_rev = scatter_data["Revenue 2025 ($)"].values
+                y_fdv = scatter_data["FDV ($)"].values
+
+                # Log transform for better fit (common in financial data)
+                log_x = np.log10(x_rev)
+                log_y = np.log10(y_fdv)
+
+                # Linear regression on log-transformed data
+                slope, intercept = np.polyfit(log_x, log_y, 1)
+
+                # Generate trend line points
+                x_line = np.linspace(x_rev.min() * 0.8, x_rev.max() * 1.2, 100)
+                y_line = 10 ** (slope * np.log10(x_line) + intercept)
+
+                # Calculate distance from trend line for each point (for coloring)
+                scatter_data["Expected FDV"] = 10 ** (slope * np.log10(scatter_data["Revenue 2025 ($)"]) + intercept)
+                scatter_data["Deviation (%)"] = ((scatter_data["FDV ($)"] - scatter_data["Expected FDV"]) / scatter_data["Expected FDV"]) * 100
+
+                # Create scatter plot
+                fig_scatter = go.Figure()
+
+                # Add trend line first (so it's behind points)
+                fig_scatter.add_trace(go.Scatter(
+                    x=x_line,
+                    y=y_line,
+                    mode='lines',
+                    name='Fair Value Line',
+                    line=dict(color='#f97316', width=3, dash='dash'),
+                    hoverinfo='skip'
+                ))
+
+                # Add shaded area below trend line (undervalued zone)
+                fig_scatter.add_trace(go.Scatter(
+                    x=np.concatenate([x_line, x_line[::-1]]),
+                    y=np.concatenate([y_line, np.zeros_like(y_line)]),
+                    fill='toself',
+                    fillcolor='rgba(34, 197, 94, 0.1)',
+                    line=dict(color='rgba(0,0,0,0)'),
+                    name='Undervalued Zone',
+                    hoverinfo='skip'
+                ))
+
+                # Add peer points
+                peers_scatter = scatter_data[scatter_data["Project"] != "Rayls (RLS)"]
+                for _, row in peers_scatter.iterrows():
+                    is_undervalued = row["Deviation (%)"] < 0
+                    point_color = "#22c55e" if is_undervalued else "#ef4444"
+
+                    fig_scatter.add_trace(go.Scatter(
+                        x=[row["Revenue 2025 ($)"]],
+                        y=[row["FDV ($)"]],
+                        mode='markers+text',
+                        marker=dict(
+                            size=12,
+                            color=point_color,
+                            line=dict(color='white', width=1),
+                            symbol='circle'
+                        ),
+                        text=[row["Project"].split()[0]],
+                        textposition="top center",
+                        textfont=dict(size=9, color=point_color),
+                        name=row["Project"],
+                        hovertemplate=(
+                            f"<b>{row['Project']}</b><br>"
+                            f"Revenue: {format_val_short(row['Revenue 2025 ($)'])}<br>"
+                            f"FDV: {format_val_short(row['FDV ($)'])}<br>"
+                            f"vs Fair Value: {row['Deviation (%)']:+.1f}%<extra></extra>"
+                        ),
+                        showlegend=False
+                    ))
+
+                # Add Rayls point (highlighted)
+                rayls_scatter = scatter_data[scatter_data["Project"] == "Rayls (RLS)"]
+                if len(rayls_scatter) > 0:
+                    rayls_row = rayls_scatter.iloc[0]
+                    rayls_deviation = rayls_row["Deviation (%)"]
+
+                    fig_scatter.add_trace(go.Scatter(
+                        x=[rayls_row["Revenue 2025 ($)"]],
+                        y=[rayls_row["FDV ($)"]],
+                        mode='markers+text',
+                        marker=dict(
+                            size=20,
+                            color='#3b82f6',
+                            line=dict(color='white', width=3),
+                            symbol='diamond'
+                        ),
+                        text=["⭐ RLS"],
+                        textposition="top center",
+                        textfont=dict(size=12, color='#3b82f6', family='Arial Black'),
+                        name=f"Rayls ({rayls_deviation:+.1f}% vs fair value)",
+                        hovertemplate=(
+                            f"<b>Rayls (RLS)</b><br>"
+                            f"Revenue: {format_val_short(rayls_row['Revenue 2025 ($)'])}<br>"
+                            f"FDV: {format_val_short(rayls_row['FDV ($)'])}<br>"
+                            f"vs Fair Value: {rayls_deviation:+.1f}%<br>"
+                            f"<b>{'UNDERVALUED' if rayls_deviation < 0 else 'OVERVALUED'}</b><extra></extra>"
+                        ),
+                    ))
+
+                # Custom tick values for revenue (X-axis) in millions
+                x_tickvals = [1e6, 5e6, 10e6, 50e6, 100e6, 500e6, 1e9]
+                x_ticktext = ["$1M", "$5M", "$10M", "$50M", "$100M", "$500M", "$1B"]
+
+                # Custom tick values for FDV (Y-axis) in billions
+                y_tickvals = [100e6, 500e6, 1e9, 5e9, 10e9, 50e9, 100e9, 500e9]
+                y_ticktext = ["$100M", "$500M", "$1B", "$5B", "$10B", "$50B", "$100B", "$500B"]
+
+                fig_scatter.update_layout(
+                    title=dict(
+                        text="FDV vs Revenue: Who's Under/Overvalued?",
+                        font=dict(size=18)
+                    ),
+                    xaxis_title="Revenue 2025",
+                    yaxis_title="Fully Diluted Valuation (FDV)",
+                    height=500,
+                    showlegend=True,
+                    legend=dict(
+                        orientation="h",
+                        yanchor="bottom",
+                        y=1.02,
+                        xanchor="right",
+                        x=1
+                    ),
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    xaxis=dict(
+                        showgrid=True,
+                        gridwidth=1,
+                        gridcolor="rgba(128,128,128,0.2)",
+                        type="log",
+                        tickvals=x_tickvals,
+                        ticktext=x_ticktext,
+                    ),
+                    yaxis=dict(
+                        showgrid=True,
+                        gridwidth=1,
+                        gridcolor="rgba(128,128,128,0.2)",
+                        type="log",
+                        tickvals=y_tickvals,
+                        ticktext=y_ticktext,
+                    ),
+                )
+
+                st.plotly_chart(fig_scatter, use_container_width=True)
+
+                # Insight based on Rayls position
+                if len(rayls_scatter) > 0:
+                    rayls_deviation = rayls_scatter.iloc[0]["Deviation (%)"]
+                    if rayls_deviation < 0:
+                        st.success(f"""
+                        **Chart Insight:** Rayls (blue diamond) sits **below** the fair value line, trading at **{abs(rayls_deviation):.1f}% below**
+                        where it should be based on its revenue. This visual confirms RLS is undervalued relative to the peer group's
+                        revenue-to-FDV relationship.
+                        """)
+                    else:
+                        st.info(f"""
+                        **Chart Insight:** Rayls (blue diamond) sits **above** the fair value line, trading at **{rayls_deviation:.1f}% above**
+                        the expected valuation based on its revenue.
+                        """)
+
+            # Valuation Gap Waterfall/Comparison Chart
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown("#### 📊 Valuation Gap Analysis", unsafe_allow_html=True)
+
+            # Create comparison data for implied vs actual FDV
+            comparison_data = pd.DataFrame([
+                {"Metric": "Current FDV", "Value": rayls_fdv / 1e9, "Type": "Current"},
+                {"Metric": "Fair Value (Peer Avg)", "Value": implied_fdv_at_avg / 1e9 if implied_fdv_at_avg else 0, "Type": "Implied"},
+                {"Metric": "Fair Value (Peer Median)", "Value": implied_fdv_at_median / 1e9 if implied_fdv_at_median else 0, "Type": "Implied"},
+            ])
+
+            fig_comparison = px.bar(
+                comparison_data,
+                x="Metric",
+                y="Value",
+                color="Type",
+                color_discrete_map={"Current": "#4299e1", "Implied": "#22c55e"},
+                text=comparison_data["Value"].apply(lambda x: f"${x:.2f}B"),
+            )
+
+            fig_comparison.update_traces(textposition="outside")
+
+            fig_comparison.update_layout(
+                title=dict(
+                    text="Rayls: Current vs Implied Fair Value",
+                    font=dict(size=18)
+                ),
+                xaxis_title="",
+                yaxis_title="Valuation ($ Billions)",
+                height=350,
+                showlegend=True,
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="right",
+                    x=1
+                ),
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+            )
+
+            fig_comparison.update_yaxes(
+                showgrid=True,
+                gridwidth=1,
+                gridcolor="rgba(128,128,128,0.2)",
+            )
+
+            st.plotly_chart(fig_comparison, use_container_width=True)
+
+            # Summary insight box
+            if discount_vs_avg > 0:
+                st.success(f"""
+                ### ✅ Rayls Appears Undervalued
+
+                **Key Findings:**
+                - Rayls trades at a **{discount_vs_avg:.1f}% discount** to peer average multiple
+                - At peer average valuation ({peer_avg_multiple:.1f}x), Rayls implied FDV would be **{format_currency(implied_fdv_at_avg)}**
+                - This represents potential upside of **{upside_at_avg:+.1f}%** from current levels
+
+                **Investment Thesis:** Rayls offers exposure to blockchain protocol revenue at a significantly lower valuation multiple compared to comparable projects.
+                """)
+            else:
+                st.warning(f"""
+                ### Rayls Valuation vs Peers
+
+                - Rayls trades at a **{-discount_vs_avg:.1f}% premium** to peer average multiple
+                - Current multiple: {rayls_mult:.1f}x vs peer average: {peer_avg_multiple:.1f}x
+                """)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.divider()
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ==========================================
+    # ORIGINAL BUBBLE CHART SECTION
+    # ==========================================
     st.markdown('<div class="section-header">FDV/Revenue vs Revenue Growth Analysis</div>', unsafe_allow_html=True)
     st.markdown("""
     This bubble chart helps identify valuation opportunities by comparing:
@@ -940,7 +1723,7 @@ with tab4:
     days_map = {"30 Days": 30, "90 Days": 90, "180 Days": 180, "1 Year": 365}
     selected_days = days_map[time_period]
 
-    # Token configurations for historical data
+    # Token configurations for historical data (uses CoinGecko IDs)
     token_configs = [
         {"name": "zkSync Era", "coingecko_id": "zksync"},
         {"name": "Plume Mainnet", "coingecko_id": "plume"},
@@ -948,6 +1731,7 @@ with tab4:
         {"name": "Ondo Finance", "coingecko_id": "ondo-finance"},
         {"name": "Ondo Yield Assets", "coingecko_id": "ondo-us-dollar-yield"},
         {"name": "Polygon", "coingecko_id": "polygon-ecosystem-token"},
+        {"name": "Rayls (RLS)", "coingecko_id": "rayls"},
     ]
 
     @st.cache_data(ttl=600, show_spinner=False)  # Cache for 10 minutes
@@ -1158,6 +1942,6 @@ with col2:
 
 st.markdown("""
 <div style="text-align: center; color: #64748b; font-size: 0.85rem; margin-top: 1rem;">
-    Data refreshes automatically every 5 minutes • Prices from CoinGecko & CoinMarketCap
+    Data refreshes automatically every 5 minutes • Prices from CoinMarketCap • Historical data from CoinGecko
 </div>
 """, unsafe_allow_html=True)
