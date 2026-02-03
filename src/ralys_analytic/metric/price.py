@@ -4,83 +4,119 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Mapping from CoinGecko IDs to CoinMarketCap symbols
+COINGECKO_TO_CMC_SYMBOL = {
+    "zksync": "ZK",
+    "plume": "PLUME",
+    "avalanche-2": "AVAX",
+    "ondo-finance": "ONDO",
+    "ondo-us-dollar-yield": "USDY",
+    "polygon-ecosystem-token": "POL",
+    "rls": "RLS",
+}
 
-def getCoingeckoPrice(coingecko_id: str):
+
+def getCoinMarketCapPrice(symbol: str):
     """
-    Get token price and price changes from CoinGecko API.
+    Get token price and price changes from CoinMarketCap API.
 
     Args:
-        coingecko_id: CoinGecko token ID (e.g., "bitcoin", "ethereum")
+        symbol: CoinMarketCap token symbol (e.g., "BTC", "ETH")
 
     Returns:
         Dictionary with current price and percent changes (24h, 7d, 30d)
     """
-    url = "https://api.coingecko.com/api/v3/simple/price"
+    api_key = os.getenv("COINMARKET_API_KEY")
+    url = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest"
 
-    params = {
-        "ids": coingecko_id,
-        "vs_currencies": "usd",
-        "include_24hr_change": "true",
-        "include_7d_change": "true",
-        "include_30d_change": "true",
+    headers = {
+        "Accepts": "application/json",
+        "X-CMC_PRO_API_KEY": api_key,
     }
 
-    response = requests.get(url, params=params)
+    params = {
+        "symbol": symbol,
+        "convert": "USD",
+    }
+
+    response = requests.get(url, headers=headers, params=params)
     data = response.json()
 
-    if response.status_code == 200 and coingecko_id in data:
-        token_data = data[coingecko_id]
+    if response.status_code == 200 and "data" in data and symbol in data["data"]:
+        token_data = data["data"][symbol]
+        quote = token_data["quote"]["USD"]
         return {
-            "price": token_data.get("usd"),
-            "percent_change_24h": token_data.get("usd_24h_change"),
-            "percent_change_7d": token_data.get("usd_7d_change"),
-            "percent_change_30d": token_data.get("usd_30d_change"),
+            "price": quote.get("price"),
+            "percent_change_24h": quote.get("percent_change_24h"),
+            "percent_change_7d": quote.get("percent_change_7d"),
+            "percent_change_30d": quote.get("percent_change_30d"),
         }
     else:
-        raise Exception(f"Error fetching price for {coingecko_id}: {data}")
+        error_msg = data.get("status", {}).get("error_message", "Unknown error")
+        raise Exception(f"Error fetching price for {symbol}: {error_msg}")
 
 
-def getCoingeckoPricesBatch(coingecko_ids: list[str]):
+def getCoinMarketCapPricesBatch(coingecko_ids: list[str]):
     """
     Get prices and price changes for multiple tokens in a single API call.
-    Uses /coins/markets endpoint to get 7d and 30d price changes.
+    Uses CoinMarketCap API with symbol mapping from CoinGecko IDs.
 
     Args:
-        coingecko_ids: List of CoinGecko token IDs
+        coingecko_ids: List of CoinGecko token IDs (for compatibility)
 
     Returns:
-        Dictionary mapping token ID to price data
+        Dictionary mapping CoinGecko token ID to price data
     """
-    url = "https://api.coingecko.com/api/v3/coins/markets"
+    api_key = os.getenv("COINMARKET_API_KEY")
+    url = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest"
 
-    params = {
-        "ids": ",".join(coingecko_ids),
-        "vs_currency": "usd",
-        "price_change_percentage": "24h,7d,30d",
+    headers = {
+        "Accepts": "application/json",
+        "X-CMC_PRO_API_KEY": api_key,
     }
 
-    response = requests.get(url, params=params)
+    # Map CoinGecko IDs to CoinMarketCap symbols
+    symbols = []
+    id_to_symbol = {}
+    for cg_id in coingecko_ids:
+        symbol = COINGECKO_TO_CMC_SYMBOL.get(cg_id)
+        if symbol:
+            symbols.append(symbol)
+            id_to_symbol[cg_id] = symbol
+
+    if not symbols:
+        return {cg_id: {"price": None, "market_cap": None, "percent_change_24h": None, "percent_change_7d": None, "percent_change_30d": None} for cg_id in coingecko_ids}
+
+    params = {
+        "symbol": ",".join(symbols),
+        "convert": "USD",
+    }
+
+    response = requests.get(url, headers=headers, params=params)
     data = response.json()
 
     if response.status_code != 200:
-        raise Exception(f"Error fetching prices from CoinGecko: {data}")
+        error_msg = data.get("status", {}).get("error_message", "Unknown error")
+        raise Exception(f"Error fetching prices from CoinMarketCap: {error_msg}")
 
-    # Build results from the list response
+    # Build results mapping back to CoinGecko IDs
     results = {}
-    data_by_id = {item["id"]: item for item in data} if isinstance(data, list) else {}
+    api_data = data.get("data", {})
 
-    for token_id in coingecko_ids:
-        if token_id in data_by_id:
-            token_data = data_by_id[token_id]
-            results[token_id] = {
-                "price": token_data.get("current_price"),
-                "market_cap": token_data.get("market_cap"),
-                "percent_change_24h": token_data.get("price_change_percentage_24h_in_currency"),
-                "percent_change_7d": token_data.get("price_change_percentage_7d_in_currency"),
-                "percent_change_30d": token_data.get("price_change_percentage_30d_in_currency"),
+    for cg_id in coingecko_ids:
+        symbol = id_to_symbol.get(cg_id)
+        if symbol and symbol in api_data:
+            token_data = api_data[symbol]
+            quote = token_data["quote"]["USD"]
+            results[cg_id] = {
+                "price": quote.get("price"),
+                "market_cap": quote.get("market_cap"),
+                "percent_change_24h": quote.get("percent_change_24h"),
+                "percent_change_7d": quote.get("percent_change_7d"),
+                "percent_change_30d": quote.get("percent_change_30d"),
             }
         else:
-            results[token_id] = {
+            results[cg_id] = {
                 "price": None,
                 "market_cap": None,
                 "percent_change_24h": None,
@@ -89,6 +125,20 @@ def getCoingeckoPricesBatch(coingecko_ids: list[str]):
             }
 
     return results
+
+
+# Keep old function names as aliases for backwards compatibility
+def getCoingeckoPrice(coingecko_id: str):
+    """Alias for getCoinMarketCapPrice (uses symbol mapping)."""
+    symbol = COINGECKO_TO_CMC_SYMBOL.get(coingecko_id)
+    if not symbol:
+        raise Exception(f"No CoinMarketCap symbol mapping for {coingecko_id}")
+    return getCoinMarketCapPrice(symbol)
+
+
+def getCoingeckoPricesBatch(coingecko_ids: list[str]):
+    """Alias for getCoinMarketCapPricesBatch (uses symbol mapping)."""
+    return getCoinMarketCapPricesBatch(coingecko_ids)
 
 
 def getRaylsPrice():
@@ -131,44 +181,47 @@ def getRaylsPrice():
 
 def getHistoricalPrices(coingecko_id: str, days: int = 30):
     """
-    Get historical price data from CoinGecko.
+    Get historical price data from CoinGecko (free tier supports historical data).
 
     Args:
         coingecko_id: CoinGecko token ID
         days: Number of days of historical data (max 365 for free tier)
 
     Returns:
-        List of [timestamp, price] pairs
+        List of [timestamp, price] pairs or None if unavailable
     """
     url = f"https://api.coingecko.com/api/v3/coins/{coingecko_id}/market_chart"
 
     params = {
         "vs_currency": "usd",
         "days": days,
-        "interval": "daily" if days > 90 else None,
     }
-    # Remove None values
-    params = {k: v for k, v in params.items() if v is not None}
+    if days > 90:
+        params["interval"] = "daily"
 
-    response = requests.get(url, params=params)
-    data = response.json()
+    try:
+        response = requests.get(url, params=params)
+        data = response.json()
 
-    if response.status_code != 200:
+        if response.status_code != 200:
+            return None
+
+        return data.get("prices", [])
+
+    except Exception:
         return None
-
-    return data.get("prices", [])
 
 
 def getHistoricalPricesBatch(token_configs: list, days: int = 30):
     """
-    Get historical prices for multiple tokens.
+    Get historical prices for multiple tokens from CoinGecko.
 
     Args:
         token_configs: List of dicts with 'coingecko_id' and 'name'
         days: Number of days of historical data
 
     Returns:
-        Dictionary mapping token name to normalized price series
+        Dictionary mapping token name to price series
     """
     import time
 
@@ -178,16 +231,12 @@ def getHistoricalPricesBatch(token_configs: list, days: int = 30):
         coingecko_id = config.get("coingecko_id")
         name = config.get("name")
 
-        if coingecko_id == "rls":
-            # Skip Rayls for CoinGecko (will use CoinMarketCap)
-            continue
-
         try:
             prices = getHistoricalPrices(coingecko_id, days)
             if prices and len(prices) > 0:
                 results[name] = prices
-            # Add small delay to avoid rate limiting
-            time.sleep(0.5)
+            # Add delay to avoid CoinGecko rate limiting (10-50 calls/min for free tier)
+            time.sleep(1.5)
         except Exception:
             continue
 
