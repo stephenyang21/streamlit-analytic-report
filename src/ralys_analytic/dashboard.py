@@ -254,15 +254,15 @@ tab1, tab2, tab3, tab4 = st.tabs(["📊 Project Comparison", "💹 Market Condit
 def load_data():
     client = DefiLlama()
 
-    # Metadata: (name, display_name, token_supply, coingecko_id, type, revenue_override)
+    # Metadata: (name, display_name, token_supply, circulating_token, coingecko_id, type, revenue_override)
     metadata = [
-        ("zksync_era", "zkSync Era", 21_000_000_000, "zksync", "protocol", None),
-        ("plume_mainnet", "Plume Mainnet", 10_000_000_000, "plume", "protocol", None),
-        ("avalanche", "Avalanche", 715_740_000, "avalanche-2", "protocol", None),
-        ("ondo_finance", "Ondo Finance", 10_000_000_000, "ondo-finance", "protocol", None),
-        ("ondo_yield_assets", "Ondo Yield Assets", 1_250_000_000, "ondo-us-dollar-yield", "protocol", None),
-        ("polygon", "Polygon", 10_000_000_000, "polygon-ecosystem-token", "chain", None),
-        ("rayls", "Rayls (RLS)", 10_000_000_000, "rls", "protocol", 2_000_000),
+        ("zksync_era", "zkSync Era", 21_000_000_000, 8_620_000_000, "zksync", "protocol", None),
+        ("plume_mainnet", "Plume Mainnet", 10_000_000_000, 4_800_000_000, "plume", "protocol", None),
+        ("avalanche", "Avalanche", 715_740_000, 431_720_000, "avalanche-2", "protocol", None),
+        ("ondo_finance", "Ondo Finance", 10_000_000_000, 4_860_000_000, "ondo-finance", "protocol", None),
+        ("ondo_yield_assets", "Ondo Yield Assets", 1_250_000_000, 628_940_000, "ondo-us-dollar-yield", "protocol", None),
+        ("polygon", "Polygon", 10_000_000_000, 1_910_000_000, "polygon-ecosystem-token", "chain", None),
+        ("rayls", "Rayls (RLS)", 10_000_000_000, 1_500_000_000, "rls", "protocol", 2_000_000),
     ]
 
     def get_2025_revenue(revenue_data):
@@ -273,7 +273,7 @@ def load_data():
         return None
 
     # Fetch CoinGecko prices for non-Rayls tokens
-    coingecko_ids = [item[3] for item in metadata if item[3] != "rls"]
+    coingecko_ids = [item[4] for item in metadata if item[4] != "rls"]
     price_data_batch = price.getCoingeckoPricesBatch(coingecko_ids)
 
     # Fetch Rayls price from CoinMarketCap
@@ -298,7 +298,7 @@ def load_data():
     results = []
 
     for item in metadata:
-        _, display_name, token_supply, coingecko_id, item_type, revenue_override = item
+        _, display_name, token_supply, circulating_token, coingecko_id, item_type, revenue_override = item
 
         try:
             price_data = price_data_batch.get(coingecko_id, {})
@@ -327,12 +327,17 @@ def load_data():
 
             multiplier = fdv / revenue_2025 if fdv and revenue_2025 and revenue_2025 > 0 else None
 
+            # Calculate circulating market cap
+            circulating_market_cap = current_price * circulating_token if current_price else None
+
             results.append({
                 "Project": display_name,
                 "Current Price ($)": current_price,
                 "Token Supply": token_supply,
+                "Circulating Supply": circulating_token,
                 "FDV ($)": fdv,
                 "Market Cap ($)": market_cap,
+                "Circulating Market Cap ($)": circulating_market_cap,
                 "Revenue 2025 ($)": revenue_2025,
                 "Multiplier (FDV/Revenue)": multiplier,
                 "Revenue Growth 30d (%)": revenue_growth_30d,
@@ -346,8 +351,10 @@ def load_data():
                 "Project": display_name,
                 "Current Price ($)": None,
                 "Token Supply": token_supply,
+                "Circulating Supply": circulating_token,
                 "FDV ($)": None,
                 "Market Cap ($)": None,
+                "Circulating Market Cap ($)": None,
                 "Revenue 2025 ($)": None,
                 "Multiplier (FDV/Revenue)": None,
                 "Revenue Growth 30d (%)": None,
@@ -506,6 +513,39 @@ with tab1:
             "Change 24h (%)": st.column_config.TextColumn("24h", width="small"),
             "Change 7d (%)": st.column_config.TextColumn("7d", width="small"),
             "Change 30d (%)": st.column_config.TextColumn("30d", width="small"),
+        }
+    )
+
+    # Market Cap comparison table
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown('<div class="section-header">Market Cap Comparison</div>', unsafe_allow_html=True)
+
+    # Create market cap display dataframe
+    mcap_cols = ["Project", "Current Price ($)", "Circulating Supply", "Token Supply", "Circulating Market Cap ($)", "FDV ($)"]
+    mcap_df = df[mcap_cols].copy()
+    mcap_df["Current Price ($)"] = df["Current Price ($)"].apply(lambda x: f"${x:,.6f}" if x and not pd.isna(x) else "N/A")
+    mcap_df["Circulating Supply"] = df["Circulating Supply"].apply(format_supply)
+    mcap_df["Token Supply"] = df["Token Supply"].apply(format_supply)
+    mcap_df["Circulating Market Cap ($)"] = df["Circulating Market Cap ($)"].apply(format_currency)
+    mcap_df["FDV ($)"] = df["FDV ($)"].apply(format_currency)
+
+    # Sort by circulating market cap descending
+    mcap_df_sorted = mcap_df.copy()
+    mcap_df_sorted["_sort_key"] = df["Circulating Market Cap ($)"]
+    mcap_df_sorted = mcap_df_sorted.sort_values("_sort_key", ascending=False).drop(columns=["_sort_key"])
+
+    st.dataframe(
+        mcap_df_sorted,
+        use_container_width=True,
+        hide_index=True,
+        height=320,
+        column_config={
+            "Project": st.column_config.TextColumn("Project", width="medium"),
+            "Current Price ($)": st.column_config.TextColumn("Price", width="small"),
+            "Circulating Supply": st.column_config.TextColumn("Circ. Supply", width="small"),
+            "Token Supply": st.column_config.TextColumn("Total Supply", width="small"),
+            "Circulating Market Cap ($)": st.column_config.TextColumn("Circ. Market Cap", width="medium"),
+            "FDV ($)": st.column_config.TextColumn("FDV", width="small"),
         }
     )
 
