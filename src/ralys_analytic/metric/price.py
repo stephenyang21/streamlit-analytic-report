@@ -12,6 +12,7 @@ COINGECKO_TO_CMC_SYMBOL = {
     "ondo-finance": "ONDO",
     "ondo-us-dollar-yield": "USDY",
     "polygon-ecosystem-token": "POL",
+    "chainlink": "LINK",
     "rls": "RLS",
 }
 
