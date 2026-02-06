@@ -6,6 +6,8 @@ from defillama_sdk import DefiLlama
 
 from metric import revenue
 from metric import price
+from metric import holders
+from metric import analytics
 
 st.set_page_config(
     page_title="Rayls Token Analytics",
@@ -247,7 +249,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Navigation tabs
-tab1, tab2, tab3, tab4 = st.tabs(["📊 Project Comparison", "💹 Market Condition", "📈 Valuation Analysis", "📉 Price Performance"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Project Comparison", "💹 Market Condition", "📈 Valuation Analysis", "👥 Token Holders", "📈 Token Analytics"])
 
 
 @st.cache_data(ttl=300)  # Cache for 5 minutes
@@ -262,6 +264,7 @@ def load_data():
         ("ondo_finance", "Ondo Finance", 10_000_000_000,4_860_000_000, "ondo-finance", "protocol", None),
         ("ondo_yield_assets", "Ondo Yield Assets", 1_250_000_000, 628_940_000,"ondo-us-dollar-yield", "protocol", None),
         ("polygon", "Polygon", 10_000_000_000, 1_910_000_000, "polygon-ecosystem-token", "chain", None),
+        ("chainlink", "Chainlink", 1_000_000_000, 626_000_000, "chainlink", "protocol", None),
         ("rayls", "Rayls (RLS)", 10_000_000_000, 1_500_000_000,"rls", "protocol", 2_000_000),
     ]
 
@@ -1384,76 +1387,6 @@ with tab3:
                         the expected valuation based on its revenue.
                         """)
 
-            # Valuation Gap Waterfall/Comparison Chart
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.markdown("#### 📊 Valuation Gap Analysis", unsafe_allow_html=True)
-
-            # Create comparison data for implied vs actual FDV
-            comparison_data = pd.DataFrame([
-                {"Metric": "Current FDV", "Value": rayls_fdv / 1e9, "Type": "Current"},
-                {"Metric": "Fair Value (Peer Avg)", "Value": implied_fdv_at_avg / 1e9 if implied_fdv_at_avg else 0, "Type": "Implied"},
-                {"Metric": "Fair Value (Peer Median)", "Value": implied_fdv_at_median / 1e9 if implied_fdv_at_median else 0, "Type": "Implied"},
-            ])
-
-            fig_comparison = px.bar(
-                comparison_data,
-                x="Metric",
-                y="Value",
-                color="Type",
-                color_discrete_map={"Current": "#4299e1", "Implied": "#22c55e"},
-                text=comparison_data["Value"].apply(lambda x: f"${x:.2f}B"),
-            )
-
-            fig_comparison.update_traces(textposition="outside")
-
-            fig_comparison.update_layout(
-                title=dict(
-                    text="Rayls: Current vs Implied Fair Value",
-                    font=dict(size=18)
-                ),
-                xaxis_title="",
-                yaxis_title="Valuation ($ Billions)",
-                height=350,
-                showlegend=True,
-                legend=dict(
-                    orientation="h",
-                    yanchor="bottom",
-                    y=1.02,
-                    xanchor="right",
-                    x=1
-                ),
-                plot_bgcolor="rgba(0,0,0,0)",
-                paper_bgcolor="rgba(0,0,0,0)",
-            )
-
-            fig_comparison.update_yaxes(
-                showgrid=True,
-                gridwidth=1,
-                gridcolor="rgba(128,128,128,0.2)",
-            )
-
-            st.plotly_chart(fig_comparison, use_container_width=True)
-
-            # Summary insight box
-            if discount_vs_avg > 0:
-                st.success(f"""
-                ### ✅ Rayls Appears Undervalued
-
-                **Key Findings:**
-                - Rayls trades at a **{discount_vs_avg:.1f}% discount** to peer average multiple
-                - At peer average valuation ({peer_avg_multiple:.1f}x), Rayls implied FDV would be **{format_currency(implied_fdv_at_avg)}**
-                - This represents potential upside of **{upside_at_avg:+.1f}%** from current levels
-
-                **Investment Thesis:** Rayls offers exposure to blockchain protocol revenue at a significantly lower valuation multiple compared to comparable projects.
-                """)
-            else:
-                st.warning(f"""
-                ### Rayls Valuation vs Peers
-
-                - Rayls trades at a **{-discount_vs_avg:.1f}% premium** to peer average multiple
-                - Current multiple: {rayls_mult:.1f}x vs peer average: {peer_avg_multiple:.1f}x
-                """)
-
     st.markdown("<br>", unsafe_allow_html=True)
     st.divider()
     st.markdown("<br>", unsafe_allow_html=True)
@@ -1703,101 +1636,642 @@ with tab3:
     else:
         st.warning("Insufficient data to generate the valuation chart. Revenue growth data is not available for the projects.")
 
-# Tab 4: Price Performance
+# Tab 4: Token Holders
 with tab4:
-    st.markdown('<div class="section-header">Normalized Price Performance</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">Token Holder Analytics</div>', unsafe_allow_html=True)
     st.markdown("""
-    Compare relative price performance across all tokens. All prices are normalized to **100** at the start date,
-    allowing direct comparison regardless of absolute price levels.
-
-    *Note: Rayls historical data may not be available due to API limitations.*
+    Track token holder metrics across Ethereum mainnet. Data powered by **Moralis API**.
     """)
 
-    # Time period selector
-    time_period = st.radio(
-        "Select Time Period",
-        ["30 Days", "90 Days", "180 Days", "1 Year"],
-        horizontal=True
-    )
+    @st.cache_data(ttl=600)  # Cache for 10 minutes
+    def load_holders_data():
+        """Load token holder data from Moralis API."""
+        return holders.get_all_token_holders_data()
 
-    days_map = {"30 Days": 30, "90 Days": 90, "180 Days": 180, "1 Year": 365}
-    selected_days = days_map[time_period]
+    with st.spinner("Loading token holder data from Moralis..."):
+        holders_data = load_holders_data()
 
-    # Token configurations for historical data (uses CoinGecko IDs)
-    token_configs = [
-        {"name": "zkSync Era", "coingecko_id": "zksync"},
-        {"name": "Plume Mainnet", "coingecko_id": "plume"},
-        {"name": "Avalanche", "coingecko_id": "avalanche-2"},
-        {"name": "Ondo Finance", "coingecko_id": "ondo-finance"},
-        {"name": "Ondo Yield Assets", "coingecko_id": "ondo-us-dollar-yield"},
-        {"name": "Polygon", "coingecko_id": "polygon-ecosystem-token"},
-        {"name": "Rayls (RLS)", "coingecko_id": "rayls"},
-    ]
+    if holders_data:
+        # Rayls highlight section
+        rayls_holders = holders_data.get("Rayls (RLS)", {})
 
-    @st.cache_data(ttl=600, show_spinner=False)  # Cache for 10 minutes
-    def load_historical_prices(days: int):
-        """Load historical price data for all tokens."""
-        return price.getHistoricalPricesBatch(token_configs, days)
+        st.markdown('<div class="section-header">Rayls (RLS) Holder Overview</div>', unsafe_allow_html=True)
 
-    with st.spinner(f"Loading {time_period} historical price data..."):
-        historical_data = load_historical_prices(selected_days)
+        # Get holder change data
+        holder_change = rayls_holders.get("holder_change", {})
 
-    if historical_data and len(historical_data) > 0:
-        # Build normalized price dataframe
-        all_series = []
+        col1, col2, col3, col4 = st.columns(4)
 
-        for token_name, prices in historical_data.items():
-            if not prices or len(prices) < 2:
-                continue
-
-            # Extract timestamps and prices
-            timestamps = [datetime.fromtimestamp(p[0] / 1000) for p in prices]
-            price_values = [p[1] for p in prices]
-
-            # Normalize to 100 at start
-            start_price = price_values[0]
-            if start_price and start_price > 0:
-                normalized = [(p / start_price) * 100 for p in price_values]
-
-                for i, (ts, norm_price) in enumerate(zip(timestamps, normalized)):
-                    all_series.append({
-                        "Date": ts,
-                        "Normalized Price": norm_price,
-                        "Token": token_name,
-                        "Actual Price": price_values[i]
-                    })
-
-        if all_series:
-            price_df = pd.DataFrame(all_series)
-
-            # Create the line chart
-            fig = px.line(
-                price_df,
-                x="Date",
-                y="Normalized Price",
-                color="Token",
-                hover_data={"Actual Price": ":.6f", "Normalized Price": ":.2f"},
-                color_discrete_sequence=px.colors.qualitative.Bold,
+        with col1:
+            holder_count = rayls_holders.get("holder_count")
+            change_24h = holder_change.get("24h", {}) if holder_change else {}
+            st.metric(
+                label="Total Holders",
+                value=f"{holder_count:,}" if holder_count else "N/A",
+                delta=f"{change_24h.get('changePercent', 0):+.2f}% (24h)" if change_24h.get('changePercent') else None
             )
 
-            # Add reference line at 100
-            fig.add_hline(
-                y=100,
-                line_dash="dash",
-                line_color="gray",
-                opacity=0.5,
-                annotation_text="Starting Point (100)",
-                annotation_position="bottom right"
+        with col2:
+            change_3d = holder_change.get("3d", {}) if holder_change else {}
+            st.metric(
+                label="3 Day Change",
+                value=f"{change_3d.get('change', 0):+,}" if change_3d.get('change') else "0",
+                delta=f"{change_3d.get('changePercent', 0):+.2f}%" if change_3d.get('changePercent') else None
             )
 
-            fig.update_layout(
+        with col3:
+            change_7d = holder_change.get("7d", {}) if holder_change else {}
+            st.metric(
+                label="7 Day Change",
+                value=f"{change_7d.get('change', 0):+,}" if change_7d.get('change') else "0",
+                delta=f"{change_7d.get('changePercent', 0):+.2f}%" if change_7d.get('changePercent') else None
+            )
+
+        with col4:
+            change_30d = holder_change.get("30d", {}) if holder_change else {}
+            st.metric(
+                label="30 Day Change",
+                value=f"{change_30d.get('change', 0):+,}" if change_30d.get('change') else "0",
+                delta=f"{change_30d.get('changePercent', 0):+.2f}%" if change_30d.get('changePercent') else None
+            )
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Holder Distribution Section (Whales, Sharks, etc.)
+        holder_distribution = rayls_holders.get("holder_distribution", {})
+
+        if holder_distribution:
+            st.markdown('<div class="section-header">Holder Distribution by Type</div>', unsafe_allow_html=True)
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                # Create distribution data
+                dist_data = pd.DataFrame([
+                    {"Type": "Whales (>1%)", "Count": holder_distribution.get("whales", 0), "Color": "#ef4444"},
+                    {"Type": "Sharks (0.1-1%)", "Count": holder_distribution.get("sharks", 0), "Color": "#f97316"},
+                    {"Type": "Dolphins (0.01-0.1%)", "Count": holder_distribution.get("dolphins", 0), "Color": "#eab308"},
+                    {"Type": "Fish (0.001-0.01%)", "Count": holder_distribution.get("fish", 0), "Color": "#22c55e"},
+                    {"Type": "Octopus (0.0001-0.001%)", "Count": holder_distribution.get("octopus", 0), "Color": "#06b6d4"},
+                    {"Type": "Crabs (0.00001-0.0001%)", "Count": holder_distribution.get("crabs", 0), "Color": "#3b82f6"},
+                    {"Type": "Shrimps (<0.00001%)", "Count": holder_distribution.get("shrimps", 0), "Color": "#8b5cf6"},
+                ])
+
+                fig_dist = px.bar(
+                    dist_data,
+                    x="Type",
+                    y="Count",
+                    color="Type",
+                    color_discrete_sequence=["#ef4444", "#f97316", "#eab308", "#22c55e", "#06b6d4", "#3b82f6", "#8b5cf6"],
+                    text="Count",
+                )
+
+                fig_dist.update_traces(textposition="outside", showlegend=False)
+
+                fig_dist.update_layout(
+                    title=dict(text="Holder Types Distribution", font=dict(size=16)),
+                    xaxis_title="",
+                    yaxis_title="Number of Holders",
+                    height=400,
+                    showlegend=False,
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    xaxis=dict(tickangle=-45),
+                )
+
+                fig_dist.update_yaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
+
+                st.plotly_chart(fig_dist, use_container_width=True)
+
+            with col2:
+                # Pie chart for holder distribution (excluding shrimps for better visibility)
+                dist_pie = dist_data[dist_data["Type"] != "Shrimps (<0.00001%)"].copy()
+
+                fig_pie_dist = px.pie(
+                    dist_pie,
+                    values="Count",
+                    names="Type",
+                    color_discrete_sequence=["#ef4444", "#f97316", "#eab308", "#22c55e", "#06b6d4", "#3b82f6"],
+                    hole=0.4,
+                )
+
+                fig_pie_dist.update_traces(textposition="outside", textinfo="percent+label", textfont_size=10)
+
+                fig_pie_dist.update_layout(
+                    title=dict(text="Distribution (excl. Shrimps)", font=dict(size=16)),
+                    height=400,
+                    showlegend=False,
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                )
+
+                st.plotly_chart(fig_pie_dist, use_container_width=True)
+
+            # Distribution metrics
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Whales", f"{holder_distribution.get('whales', 0):,}", help="Holders with >1% supply")
+            with col2:
+                st.metric("Sharks", f"{holder_distribution.get('sharks', 0):,}", help="Holders with 0.1-1% supply")
+            with col3:
+                st.metric("Dolphins", f"{holder_distribution.get('dolphins', 0):,}", help="Holders with 0.01-0.1% supply")
+            with col4:
+                st.metric("Shrimps", f"{holder_distribution.get('shrimps', 0):,}", help="Small holders <0.00001%")
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Holder Supply Concentration
+        holder_supply = rayls_holders.get("holder_supply", {})
+
+        if holder_supply:
+            st.markdown('<div class="section-header">Supply Concentration</div>', unsafe_allow_html=True)
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                # Bar chart for concentration
+                conc_data = pd.DataFrame([
+                    {"Group": "Top 10", "Supply %": float(holder_supply.get("top10", {}).get("supplyPercent", 0))},
+                    {"Group": "Top 25", "Supply %": float(holder_supply.get("top25", {}).get("supplyPercent", 0))},
+                    {"Group": "Top 50", "Supply %": float(holder_supply.get("top50", {}).get("supplyPercent", 0))},
+                    {"Group": "Top 100", "Supply %": float(holder_supply.get("top100", {}).get("supplyPercent", 0))},
+                    {"Group": "Top 250", "Supply %": float(holder_supply.get("top250", {}).get("supplyPercent", 0))},
+                ])
+
+                fig_conc = px.bar(
+                    conc_data,
+                    x="Group",
+                    y="Supply %",
+                    color="Supply %",
+                    color_continuous_scale="Blues",
+                    text=conc_data["Supply %"].apply(lambda x: f"{x:.0f}%"),
+                )
+
+                fig_conc.update_traces(textposition="outside")
+
+                fig_conc.update_layout(
+                    title=dict(text="Supply Held by Top Holders", font=dict(size=16)),
+                    xaxis_title="",
+                    yaxis_title="% of Total Supply",
+                    height=350,
+                    showlegend=False,
+                    coloraxis_showscale=False,
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                )
+
+                fig_conc.update_yaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)", range=[0, 110])
+
+                st.plotly_chart(fig_conc, use_container_width=True)
+
+            with col2:
+                # Key concentration metrics
+                st.markdown("#### Concentration Metrics")
+
+                top10_pct = float(holder_supply.get("top10", {}).get("supplyPercent", 0))
+                top10_supply = float(holder_supply.get("top10", {}).get("supply", 0))
+
+                st.metric("Top 10 Holders", f"{top10_pct:.0f}%", help=f"Supply: {top10_supply:,.0f} RLS")
+
+                top25_pct = float(holder_supply.get("top25", {}).get("supplyPercent", 0))
+                st.metric("Top 25 Holders", f"{top25_pct:.0f}%")
+
+                top100_pct = float(holder_supply.get("top100", {}).get("supplyPercent", 0))
+                st.metric("Top 100 Holders", f"{top100_pct:.0f}%")
+
+                # Concentration assessment
+                if top10_pct >= 80:
+                    st.error("Very High Concentration - Top 10 hold >80%")
+                elif top10_pct >= 60:
+                    st.warning("High Concentration - Top 10 hold >60%")
+                elif top10_pct >= 40:
+                    st.info("Moderate Concentration - Top 10 hold >40%")
+                else:
+                    st.success("Well Distributed - Top 10 hold <40%")
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # All tokens holder comparison
+        st.markdown('<div class="section-header">Token Holder Comparison</div>', unsafe_allow_html=True)
+
+        # Build comparison dataframe
+        holder_comparison = []
+        for token_name, data in holders_data.items():
+            holder_count = data.get("holder_count")
+            h_change = data.get("holder_change", {})
+
+            holder_comparison.append({
+                "Token": token_name,
+                "Holders": holder_count if holder_count else None,
+                "24h Change": h_change.get("24h", {}).get("change", 0) if h_change else 0,
+                "24h %": h_change.get("24h", {}).get("changePercent", 0) if h_change else 0,
+                "7d Change": h_change.get("7d", {}).get("change", 0) if h_change else 0,
+                "7d %": h_change.get("7d", {}).get("changePercent", 0) if h_change else 0,
+                "30d Change": h_change.get("30d", {}).get("change", 0) if h_change else 0,
+                "30d %": h_change.get("30d", {}).get("changePercent", 0) if h_change else 0,
+                "Contract": data.get("contract_address", ""),
+            })
+
+        holder_df = pd.DataFrame(holder_comparison)
+
+        # Sort by holder count descending
+        holder_df = holder_df.sort_values("Holders", ascending=False, na_position="last")
+
+        # Create bar chart for holder comparison
+        chart_data = holder_df[holder_df["Holders"].notna()].copy()
+
+        if len(chart_data) > 0:
+            # Color Rayls differently
+            chart_data["Color"] = chart_data["Token"].apply(
+                lambda x: "Rayls (RLS)" if x == "Rayls (RLS)" else "Other Tokens"
+            )
+
+            fig_holders = px.bar(
+                chart_data,
+                x="Token",
+                y="Holders",
+                color="Color",
+                color_discrete_map={"Rayls (RLS)": "#4299e1", "Other Tokens": "#64748b"},
+                text=chart_data["Holders"].apply(lambda x: f"{x:,.0f}" if x else "N/A"),
+            )
+
+            fig_holders.update_traces(textposition="outside")
+
+            fig_holders.update_layout(
                 title=dict(
-                    text=f"Normalized Price Performance ({time_period})",
-                    font=dict(size=20)
+                    text="Token Holder Count Comparison",
+                    font=dict(size=18)
                 ),
-                xaxis_title="Date",
-                yaxis_title="Normalized Price (Start = 100)",
-                height=500,
+                xaxis_title="",
+                yaxis_title="Number of Holders",
+                height=400,
+                showlegend=True,
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="right",
+                    x=1,
+                    title=""
+                ),
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+            )
+
+            fig_holders.update_yaxes(
+                showgrid=True,
+                gridwidth=1,
+                gridcolor="rgba(128,128,128,0.2)",
+            )
+
+            st.plotly_chart(fig_holders, use_container_width=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # 100% Stacked Bar (Normalized Holder Distribution)
+        st.markdown('<div class="section-header">Holder Distribution Comparison</div>', unsafe_allow_html=True)
+        st.markdown("""
+        Compare the proportional breakdown of holder categories across tokens.
+        Each bar shows the **percentage of holders** in each category, making it easy to compare distribution shapes.
+        """)
+
+        # Build normalized distribution data
+        distribution_data = []
+        category_colors = {
+            "Whales (>1%)": "#ef4444",
+            "Sharks (0.1-1%)": "#f97316",
+            "Dolphins (0.01-0.1%)": "#eab308",
+            "Fish (0.001-0.01%)": "#22c55e",
+            "Octopus": "#06b6d4",
+            "Crabs": "#3b82f6",
+            "Shrimps": "#8b5cf6",
+        }
+
+        for token_name, data in holders_data.items():
+            dist = data.get("holder_distribution", {})
+            if dist:
+                whales = dist.get("whales", 0)
+                sharks = dist.get("sharks", 0)
+                dolphins = dist.get("dolphins", 0)
+                fish = dist.get("fish", 0)
+                octopus = dist.get("octopus", 0)
+                crabs = dist.get("crabs", 0)
+                shrimps = dist.get("shrimps", 0)
+
+                total = whales + sharks + dolphins + fish + octopus + crabs + shrimps
+                if total > 0:
+                    distribution_data.extend([
+                        {"Token": token_name, "Category": "Whales (>1%)", "Percentage": (whales / total) * 100, "Order": 1},
+                        {"Token": token_name, "Category": "Sharks (0.1-1%)", "Percentage": (sharks / total) * 100, "Order": 2},
+                        {"Token": token_name, "Category": "Dolphins (0.01-0.1%)", "Percentage": (dolphins / total) * 100, "Order": 3},
+                        {"Token": token_name, "Category": "Fish (0.001-0.01%)", "Percentage": (fish / total) * 100, "Order": 4},
+                        {"Token": token_name, "Category": "Octopus", "Percentage": (octopus / total) * 100, "Order": 5},
+                        {"Token": token_name, "Category": "Crabs", "Percentage": (crabs / total) * 100, "Order": 6},
+                        {"Token": token_name, "Category": "Shrimps", "Percentage": (shrimps / total) * 100, "Order": 7},
+                    ])
+
+        if distribution_data:
+            dist_df = pd.DataFrame(distribution_data)
+            dist_df = dist_df.sort_values(["Token", "Order"])
+
+            fig_stacked = px.bar(
+                dist_df,
+                y="Token",
+                x="Percentage",
+                color="Category",
+                orientation="h",
+                color_discrete_map=category_colors,
+                category_orders={"Category": list(category_colors.keys())},
+                text=dist_df["Percentage"].apply(lambda x: f"{x:.1f}%" if x >= 5 else ""),
+            )
+
+            fig_stacked.update_traces(
+                textposition="inside",
+                textfont=dict(color="white", size=11),
+            )
+
+            fig_stacked.update_layout(
+                title=dict(
+                    text="Normalized Holder Distribution by Token",
+                    font=dict(size=18),
+                ),
+                xaxis_title="Percentage of Holders",
+                yaxis_title="",
+                xaxis=dict(
+                    ticksuffix="%",
+                    range=[0, 100],
+                    showgrid=True,
+                    gridcolor="rgba(128,128,128,0.2)",
+                ),
+                height=350,
+                showlegend=True,
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=-0.4,
+                    xanchor="center",
+                    x=0.5,
+                    title="",
+                ),
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+                bargap=0.3,
+            )
+
+            st.plotly_chart(fig_stacked, use_container_width=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Holder Growth Rate Comparison (Heatmap)
+        st.markdown('<div class="section-header">Holder Growth Rate Comparison</div>', unsafe_allow_html=True)
+        st.markdown("""
+        Compare holder growth rates across different time periods. **Green indicates growth**, **red indicates decline**.
+        Identifies which tokens are gaining or losing holders fastest.
+        """)
+
+        # Build growth rate data for heatmap
+        growth_data = []
+        for token_name, data in holders_data.items():
+            h_change = data.get("holder_change", {})
+            if h_change:
+                growth_data.append({
+                    "Token": token_name,
+                    "24h": h_change.get("24h", {}).get("changePercent", 0) if h_change.get("24h") else 0,
+                    "7d": h_change.get("7d", {}).get("changePercent", 0) if h_change.get("7d") else 0,
+                    "30d": h_change.get("30d", {}).get("changePercent", 0) if h_change.get("30d") else 0,
+                })
+
+        if growth_data:
+            growth_df = pd.DataFrame(growth_data)
+            growth_df = growth_df.set_index("Token")
+
+            # Create heatmap using plotly
+            import plotly.graph_objects as go
+
+            fig_heatmap = go.Figure(data=go.Heatmap(
+                z=growth_df.values,
+                x=growth_df.columns,
+                y=growth_df.index,
+                colorscale=[
+                    [0, "#ef4444"],      # Red for negative
+                    [0.5, "#fafafa"],    # White for zero
+                    [1, "#22c55e"],      # Green for positive
+                ],
+                zmid=0,
+                text=[[f"{val:+.2f}%" for val in row] for row in growth_df.values],
+                texttemplate="%{text}",
+                textfont=dict(size=14, color="#1f2937"),
+                hovertemplate="Token: %{y}<br>Period: %{x}<br>Change: %{text}<extra></extra>",
+            ))
+
+            fig_heatmap.update_layout(
+                title=dict(
+                    text="Holder Change % by Time Period",
+                    font=dict(size=18),
+                ),
+                xaxis_title="Time Period",
+                yaxis_title="",
+                height=300,
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+                xaxis=dict(
+                    side="bottom",
+                    tickfont=dict(size=13),
+                ),
+                yaxis=dict(
+                    tickfont=dict(size=12),
+                    autorange="reversed",
+                ),
+            )
+
+            st.plotly_chart(fig_heatmap, use_container_width=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Holder data table
+        st.markdown('<div class="section-header">Holder Data Summary</div>', unsafe_allow_html=True)
+
+        display_holder_df = holder_df[holder_df["Token"] != "Avalanche"].copy()
+        display_holder_df["Holders"] = display_holder_df["Holders"].apply(
+            lambda x: f"{x:,.0f}" if x and not pd.isna(x) else "N/A"
+        )
+        display_holder_df["24h"] = display_holder_df.apply(
+            lambda row: f"{row['24h Change']:+,} ({row['24h %']:+.2f}%)" if row['24h Change'] else "0 (0%)", axis=1
+        )
+        display_holder_df["7d"] = display_holder_df.apply(
+            lambda row: f"{row['7d Change']:+,} ({row['7d %']:+.2f}%)" if row['7d Change'] else "0 (0%)", axis=1
+        )
+        display_holder_df["30d"] = display_holder_df.apply(
+            lambda row: f"{row['30d Change']:+,} ({row['30d %']:+.2f}%)" if row['30d Change'] else "0 (0%)", axis=1
+        )
+        display_holder_df["Contract"] = display_holder_df["Contract"].apply(
+            lambda x: x[:10] + "..." + x[-6:] if x else "N/A"
+        )
+
+        st.dataframe(
+            display_holder_df[["Token", "Holders", "24h", "7d", "30d", "Contract"]],
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Token": st.column_config.TextColumn("Token", width="medium"),
+                "Holders": st.column_config.TextColumn("Holders", width="small"),
+                "24h": st.column_config.TextColumn("24h Change", width="medium"),
+                "7d": st.column_config.TextColumn("7d Change", width="medium"),
+                "30d": st.column_config.TextColumn("30d Change", width="medium"),
+                "Contract": st.column_config.TextColumn("Contract", width="medium"),
+            }
+        )
+
+
+    else:
+        st.warning("Unable to load token holder data. Please check your Moralis API key.")
+
+with tab5:
+    st.markdown('<div class="section-header">Token Trading Analytics</div>', unsafe_allow_html=True)
+    st.markdown("""
+    Track token trading metrics including buy/sell volume, unique wallets, and price changes. Data powered by **Moralis API**.
+    """)
+
+    @st.cache_data(ttl=600)  # Cache for 10 minutes
+    def load_analytics_data():
+        """Load token analytics data from Moralis API."""
+        return analytics.get_all_token_analytics()
+
+    with st.spinner("Loading token analytics data from Moralis..."):
+        analytics_data = load_analytics_data()
+
+    if analytics_data:
+        # Rayls highlight section
+        rayls_analytics = analytics_data.get("Rayls (RLS)", {})
+
+        st.markdown('<div class="section-header">Rayls (RLS) Trading Overview (Ethereum Network)</div>', unsafe_allow_html=True)
+
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            usd_price = rayls_analytics.get("usd_price")
+            price_change = rayls_analytics.get("price_percent_change", {})
+            st.metric(
+                label="USD Price",
+                value=f"${float(usd_price):.6f}" if usd_price else "N/A",
+                delta=f"{price_change.get('24h', 0):+.2f}% (24h)" if price_change.get('24h') else None
+            )
+
+        with col2:
+            liquidity = rayls_analytics.get("total_liquidity_usd")
+            st.metric(
+                label="Total Liquidity",
+                value=f"${float(liquidity):,.2f}" if liquidity else "N/A"
+            )
+
+        with col3:
+            buy_vol = rayls_analytics.get("total_buy_volume", {})
+            st.metric(
+                label="24h Buy Volume",
+                value=f"${buy_vol.get('24h', 0):,.2f}" if buy_vol.get('24h') else "$0"
+            )
+
+        with col4:
+            sell_vol = rayls_analytics.get("total_sell_volume", {})
+            st.metric(
+                label="24h Sell Volume",
+                value=f"${sell_vol.get('24h', 0):,.2f}" if sell_vol.get('24h') else "$0"
+            )
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Second row of metrics
+        col5, col6, col7, col8 = st.columns(4)
+
+        with col5:
+            buyers = rayls_analytics.get("total_buyers", {})
+            st.metric(
+                label="24h Buyers",
+                value=f"{buyers.get('24h', 0):,}" if buyers.get('24h') else "0"
+            )
+
+        with col6:
+            sellers = rayls_analytics.get("total_sellers", {})
+            st.metric(
+                label="24h Sellers",
+                value=f"{sellers.get('24h', 0):,}" if sellers.get('24h') else "0"
+            )
+
+        with col7:
+            buys = rayls_analytics.get("total_buys", {})
+            st.metric(
+                label="24h Buy Transactions",
+                value=f"{buys.get('24h', 0):,}" if buys.get('24h') else "0"
+            )
+
+        with col8:
+            sells = rayls_analytics.get("total_sells", {})
+            st.metric(
+                label="24h Sell Transactions",
+                value=f"{sells.get('24h', 0):,}" if sells.get('24h') else "0"
+            )
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # All tokens analytics comparison
+        st.markdown('<div class="section-header">Token Analytics Comparison</div>', unsafe_allow_html=True)
+
+        # Build comparison dataframe
+        analytics_comparison = []
+        for token_name, data in analytics_data.items():
+            buy_vol = data.get("total_buy_volume", {})
+            sell_vol = data.get("total_sell_volume", {})
+            buyers = data.get("total_buyers", {})
+            sellers = data.get("total_sellers", {})
+            wallets = data.get("unique_wallets", {})
+            price_change = data.get("price_percent_change", {})
+
+            # Calculate total buy volume (sum of all periods)
+            total_buy = sum([
+                buy_vol.get("5m", 0) or 0,
+                buy_vol.get("1h", 0) or 0,
+                buy_vol.get("6h", 0) or 0,
+                buy_vol.get("24h", 0) or 0
+            ]) if buy_vol else 0
+
+            analytics_comparison.append({
+                "Token": token_name,
+                "Chain": data.get("chain", "eth").upper(),
+                "USD Price": float(data.get("usd_price", 0)) if data.get("usd_price") else None,
+                "Liquidity": float(data.get("total_liquidity_usd", 0)) if data.get("total_liquidity_usd") else None,
+                "Total Buy Vol": total_buy,
+                "24h Buy Vol": buy_vol.get("24h", 0) if buy_vol else 0,
+                "24h Sell Vol": sell_vol.get("24h", 0) if sell_vol else 0,
+                "24h Buyers": buyers.get("24h", 0) if buyers else 0,
+                "24h Sellers": sellers.get("24h", 0) if sellers else 0,
+                "24h Wallets": wallets.get("24h", 0) if wallets else 0,
+                "24h Price %": price_change.get("24h", 0) if price_change else 0,
+                "Contract": data.get("contract_address", ""),
+            })
+
+        analytics_df = pd.DataFrame(analytics_comparison)
+
+        # Sort by liquidity descending
+        analytics_df = analytics_df.sort_values("Liquidity", ascending=False, na_position="last")
+
+        # Create bar chart for volume comparison
+        chart_data = analytics_df[analytics_df["Liquidity"].notna()].copy()
+
+        if len(chart_data) > 0:
+            # Volume comparison chart
+            fig_volume = px.bar(
+                chart_data,
+                x="Token",
+                y=["24h Buy Vol", "24h Sell Vol"],
+                barmode="group",
+                color_discrete_map={"24h Buy Vol": "#22c55e", "24h Sell Vol": "#ef4444"},
+                title="24h Trading Volume by Token",
+            )
+
+            fig_volume.update_layout(
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#e2e8f0"),
                 showlegend=True,
                 legend=dict(
                     orientation="h",
@@ -1806,129 +2280,145 @@ with tab4:
                     xanchor="right",
                     x=1
                 ),
-                plot_bgcolor="rgba(0,0,0,0)",
-                paper_bgcolor="rgba(0,0,0,0)",
-                hovermode="x unified"
+                xaxis=dict(tickfont=dict(size=12)),
+                yaxis=dict(tickfont=dict(size=12), tickprefix="$"),
             )
 
-            fig.update_xaxes(
-                showgrid=True,
-                gridwidth=1,
-                gridcolor="rgba(128,128,128,0.2)",
+            st.plotly_chart(fig_volume, use_container_width=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Normalized Volume Comparison
+        st.markdown('<div class="section-header">Normalized Volume Comparison (Rayls vs Peers)</div>', unsafe_allow_html=True)
+        st.markdown("""
+        Volume metrics normalized to 0-100 scale for fair comparison across tokens with different trading volumes.
+        """)
+
+        if len(chart_data) > 0:
+            # Normalize Total Buy Volume (min-max to 0-100)
+            max_total_buy = chart_data["Total Buy Vol"].max()
+            if max_total_buy > 0:
+                chart_data["Normalized Total Buy Vol"] = (chart_data["Total Buy Vol"] / max_total_buy) * 100
+            else:
+                chart_data["Normalized Total Buy Vol"] = 0
+
+            # Normalize 24h Buy Volume (min-max to 0-100)
+            max_24h_buy = chart_data["24h Buy Vol"].max()
+            if max_24h_buy > 0:
+                chart_data["Normalized 24h Buy Vol"] = (chart_data["24h Buy Vol"] / max_24h_buy) * 100
+            else:
+                chart_data["Normalized 24h Buy Vol"] = 0
+
+            # Color Rayls differently
+            chart_data["Token Type"] = chart_data["Token"].apply(
+                lambda x: "Rayls (RLS)" if x == "Rayls (RLS)" else "Peers"
             )
-            fig.update_yaxes(
-                showgrid=True,
-                gridwidth=1,
-                gridcolor="rgba(128,128,128,0.2)",
-            )
 
-            st.plotly_chart(fig, use_container_width=True)
+            col_norm1, col_norm2 = st.columns(2)
 
-            # Performance summary table
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.markdown('<div class="section-header">Performance Summary</div>', unsafe_allow_html=True)
-
-            # Calculate performance metrics for each token
-            perf_data = []
-            for token_name, prices in historical_data.items():
-                if not prices or len(prices) < 2:
-                    continue
-
-                start_price = prices[0][1]
-                end_price = prices[-1][1]
-
-                if start_price and start_price > 0:
-                    total_return = ((end_price - start_price) / start_price) * 100
-
-                    # Find max and min
-                    price_values = [p[1] for p in prices]
-                    max_price = max(price_values)
-                    min_price = min(price_values)
-                    max_drawdown = ((min_price - max_price) / max_price) * 100 if max_price > 0 else 0
-
-                    perf_data.append({
-                        "Token": token_name,
-                        "Start Price": start_price,
-                        "Current Price": end_price,
-                        "Total Return (%)": total_return,
-                        "Max Drawdown (%)": max_drawdown,
-                        "Period High": max_price,
-                        "Period Low": min_price,
-                    })
-
-            if perf_data:
-                perf_df = pd.DataFrame(perf_data)
-                perf_df = perf_df.sort_values("Total Return (%)", ascending=False)
-
-                # Format for display
-                display_perf_df = perf_df.copy()
-                display_perf_df["Start Price"] = perf_df["Start Price"].apply(lambda x: f"${x:,.6f}")
-                display_perf_df["Current Price"] = perf_df["Current Price"].apply(lambda x: f"${x:,.6f}")
-                display_perf_df["Total Return (%)"] = perf_df["Total Return (%)"].apply(format_percent_change)
-                display_perf_df["Max Drawdown (%)"] = perf_df["Max Drawdown (%)"].apply(lambda x: f"{x:.2f}%")
-                display_perf_df["Period High"] = perf_df["Period High"].apply(lambda x: f"${x:,.6f}")
-                display_perf_df["Period Low"] = perf_df["Period Low"].apply(lambda x: f"${x:,.6f}")
-
-                styled_perf_df = display_perf_df.style.map(
-                    color_percent_change,
-                    subset=["Total Return (%)"]
+            with col_norm1:
+                # Normalized Total Buy Volume chart
+                fig_norm_total = px.bar(
+                    chart_data.sort_values("Normalized Total Buy Vol", ascending=True),
+                    x="Normalized Total Buy Vol",
+                    y="Token",
+                    orientation="h",
+                    color="Token Type",
+                    color_discrete_map={"Rayls (RLS)": "#4299e1", "Peers": "#64748b"},
+                    title="Total Buy Volume (Normalized)",
+                    text=chart_data.sort_values("Normalized Total Buy Vol", ascending=True)["Normalized Total Buy Vol"].apply(lambda x: f"{x:.1f}")
                 )
 
-                st.dataframe(
-                    styled_perf_df,
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "Token": st.column_config.TextColumn("Token", width="medium"),
-                        "Start Price": st.column_config.TextColumn("Start", width="small"),
-                        "Current Price": st.column_config.TextColumn("Current", width="small"),
-                        "Total Return (%)": st.column_config.TextColumn("Return", width="small"),
-                        "Max Drawdown (%)": st.column_config.TextColumn("Max DD", width="small"),
-                        "Period High": st.column_config.TextColumn("High", width="small"),
-                        "Period Low": st.column_config.TextColumn("Low", width="small"),
-                    }
+                fig_norm_total.update_traces(textposition="outside")
+                fig_norm_total.update_layout(
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color="#e2e8f0"),
+                    showlegend=True,
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                    xaxis=dict(tickfont=dict(size=11), range=[0, 110], title="Score (0-100)"),
+                    yaxis=dict(tickfont=dict(size=11), title=""),
+                    height=350,
                 )
 
-                # Key insights
-                st.markdown("<br>", unsafe_allow_html=True)
-                st.markdown('<div class="section-header">Key Insights</div>', unsafe_allow_html=True)
+                st.plotly_chart(fig_norm_total, use_container_width=True)
 
-                col1, col2, col3 = st.columns(3)
+            with col_norm2:
+                # Normalized 24h Buy Volume chart
+                fig_norm_24h = px.bar(
+                    chart_data.sort_values("Normalized 24h Buy Vol", ascending=True),
+                    x="Normalized 24h Buy Vol",
+                    y="Token",
+                    orientation="h",
+                    color="Token Type",
+                    color_discrete_map={"Rayls (RLS)": "#4299e1", "Peers": "#64748b"},
+                    title="24h Buy Volume (Normalized)",
+                    text=chart_data.sort_values("Normalized 24h Buy Vol", ascending=True)["Normalized 24h Buy Vol"].apply(lambda x: f"{x:.1f}")
+                )
 
-                with col1:
-                    best_performer = perf_df.iloc[0]
-                    st.success(f"""
-                    **Best Performer**
+                fig_norm_24h.update_traces(textposition="outside")
+                fig_norm_24h.update_layout(
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color="#e2e8f0"),
+                    showlegend=True,
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                    xaxis=dict(tickfont=dict(size=11), range=[0, 110], title="Score (0-100)"),
+                    yaxis=dict(tickfont=dict(size=11), title=""),
+                    height=350,
+                )
 
-                    **{best_performer['Token']}**
-                    - Return: {best_performer['Total Return (%)']:+.2f}%
-                    - Current: ${best_performer['Current Price']:,.6f}
-                    """)
+                st.plotly_chart(fig_norm_24h, use_container_width=True)
 
-                with col2:
-                    worst_performer = perf_df.iloc[-1]
-                    st.error(f"""
-                    **Worst Performer**
+        st.markdown("<br>", unsafe_allow_html=True)
 
-                    **{worst_performer['Token']}**
-                    - Return: {worst_performer['Total Return (%)']:+.2f}%
-                    - Current: ${worst_performer['Current Price']:,.6f}
-                    """)
+        # Analytics data table
+        st.markdown('<div class="section-header">Analytics Data Summary</div>', unsafe_allow_html=True)
 
-                with col3:
-                    avg_return = perf_df["Total Return (%)"].mean()
-                    positive_count = len(perf_df[perf_df["Total Return (%)"] > 0])
-                    total_count = len(perf_df)
-                    st.info(f"""
-                    **Market Overview**
+        display_analytics_df = analytics_df.copy()
+        display_analytics_df["USD Price"] = analytics_df["USD Price"].apply(
+            lambda x: f"${x:.6f}" if x and not pd.isna(x) else "N/A"
+        )
+        display_analytics_df["Liquidity"] = analytics_df["Liquidity"].apply(
+            lambda x: f"${x:,.2f}" if x and not pd.isna(x) else "N/A"
+        )
+        display_analytics_df["Total Buy Vol"] = analytics_df["Total Buy Vol"].apply(
+            lambda x: f"${x:,.2f}" if x else "$0"
+        )
+        display_analytics_df["24h Buy Vol"] = analytics_df["24h Buy Vol"].apply(
+            lambda x: f"${x:,.2f}" if x else "$0"
+        )
+        display_analytics_df["24h Sell Vol"] = analytics_df["24h Sell Vol"].apply(
+            lambda x: f"${x:,.2f}" if x else "$0"
+        )
+        display_analytics_df["24h Price %"] = analytics_df["24h Price %"].apply(
+            lambda x: f"{x:+.2f}%" if x else "0%"
+        )
+        display_analytics_df["Contract"] = analytics_df["Contract"].apply(
+            lambda x: x[:10] + "..." + x[-6:] if x else "N/A"
+        )
 
-                    - Avg Return: {avg_return:+.2f}%
-                    - Winners: {positive_count}/{total_count}
-                    - Period: {time_period}
-                    """)
+        st.dataframe(
+            display_analytics_df[["Token", "Chain", "USD Price", "Liquidity", "Total Buy Vol", "24h Buy Vol", "24h Sell Vol", "24h Buyers", "24h Sellers", "24h Wallets", "24h Price %"]],
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Token": st.column_config.TextColumn("Token", width="medium"),
+                "Chain": st.column_config.TextColumn("Chain", width="small"),
+                "USD Price": st.column_config.TextColumn("USD Price", width="small"),
+                "Liquidity": st.column_config.TextColumn("Liquidity", width="medium"),
+                "Total Buy Vol": st.column_config.TextColumn("Total Buy Vol", width="small"),
+                "24h Buy Vol": st.column_config.TextColumn("24h Buy Vol", width="small"),
+                "24h Sell Vol": st.column_config.TextColumn("24h Sell Vol", width="small"),
+                "24h Buyers": st.column_config.NumberColumn("Buyers", width="small"),
+                "24h Sellers": st.column_config.NumberColumn("Sellers", width="small"),
+                "24h Wallets": st.column_config.NumberColumn("Wallets", width="small"),
+                "24h Price %": st.column_config.TextColumn("24h Price %", width="small"),
+            }
+        )
 
     else:
-        st.warning("Unable to load historical price data. This may be due to API rate limits. Please try again later.")
+        st.warning("Unable to load token analytics data. Please check your Moralis API key.")
 
 # Footer with refresh button
 st.markdown("<br>", unsafe_allow_html=True)
@@ -1942,6 +2432,6 @@ with col2:
 
 st.markdown("""
 <div style="text-align: center; color: #64748b; font-size: 0.85rem; margin-top: 1rem;">
-    Data refreshes automatically every 5 minutes • Prices from CoinMarketCap • Historical data from CoinGecko
+    Data refreshes automatically every 5 minutes • Prices from CoinMarketCap • Historical data from CoinGecko • Holder data from Moralis
 </div>
 """, unsafe_allow_html=True)
