@@ -1,5 +1,6 @@
 import os
 import requests
+import streamlit as st
 from dotenv import load_dotenv
 from .holders import TOKEN_CONTRACTS
 
@@ -9,9 +10,17 @@ load_dotenv()
 MORALIS_API_URL = "https://deep-index.moralis.io/api/v2.2"
 
 
+def get_secret(key: str):
+    """Get secret from Streamlit secrets (production) or env var (local)."""
+    try:
+        return st.secrets[key]
+    except (KeyError, FileNotFoundError):
+        return os.getenv(key)
+
+
 def get_moralis_api_key():
     """Get Moralis API key from environment."""
-    return os.getenv("MORALIS_API_KEY")
+    return get_secret("MORALIS_API_KEY")
 
 
 def get_moralis_headers():

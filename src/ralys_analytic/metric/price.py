@@ -1,8 +1,17 @@
 import os
 import requests
+import streamlit as st
 from dotenv import load_dotenv
 
 load_dotenv()
+
+
+def get_secret(key: str):
+    """Get secret from Streamlit secrets (production) or env var (local)."""
+    try:
+        return st.secrets[key]
+    except (KeyError, FileNotFoundError):
+        return os.getenv(key)
 
 # Mapping from CoinGecko IDs to CoinMarketCap symbols
 COINGECKO_TO_CMC_SYMBOL = {
@@ -27,7 +36,7 @@ def getCoinMarketCapPrice(symbol: str):
     Returns:
         Dictionary with current price and percent changes (24h, 7d, 30d)
     """
-    api_key = os.getenv("COINMARKET_API_KEY")
+    api_key = get_secret("COINMARKET_API_KEY")
     url = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest"
 
     headers = {
@@ -68,7 +77,7 @@ def getCoinMarketCapPricesBatch(coingecko_ids: list[str]):
     Returns:
         Dictionary mapping CoinGecko token ID to price data
     """
-    api_key = os.getenv("COINMARKET_API_KEY")
+    api_key = get_secret("COINMARKET_API_KEY")
     url = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest"
 
     headers = {
@@ -147,7 +156,7 @@ def getRaylsPrice():
     Get the latest Rayls (RLS) token price in USD from CoinMarketCap API.
     Includes price changes for 24h, 7d, and 30d.
     """
-    api_key = os.getenv("COINMARKET_API_KEY")
+    api_key = get_secret("COINMARKET_API_KEY")
 
     url = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest"
 
@@ -254,7 +263,7 @@ def getRaylsHistoricalPrices(days: int = 30):  # noqa: ARG001
     Returns:
         List of [timestamp, price] pairs or None if unavailable
     """
-    api_key = os.getenv("COINMARKET_API_KEY")
+    api_key = get_secret("COINMARKET_API_KEY")
 
     if not api_key:
         return None
