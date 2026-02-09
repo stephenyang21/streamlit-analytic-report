@@ -8,6 +8,8 @@ from metric import revenue
 from metric import price
 from metric import holders
 from metric import analytics
+from metric import etherscan
+from metric import binance_futures
 
 st.set_page_config(
     page_title="Rayls Token Analytics",
@@ -249,7 +251,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Navigation tabs
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Project Comparison", "💹 Market Condition", "📈 Valuation Analysis", "👥 Token Holders", "📈 Token Analytics"])
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["📊 Project Comparison", "💹 Market Condition", "📈 Valuation Analysis", "👥 Token Holders", "📈 Token Analytics", "📈 Futures Analytics", "🐋 Whale Tracker"])
 
 
 @st.cache_data(ttl=300)  # Cache for 5 minutes
@@ -2420,6 +2422,556 @@ with tab5:
     else:
         st.warning("Unable to load token analytics data. Please check your Moralis API key.")
 
+# Tab 6: Futures Analytics
+with tab6:
+    st.markdown('<div class="section-header">RLSUSDT Futures Analytics</div>', unsafe_allow_html=True)
+    st.markdown("""
+    Track RLSUSDT perpetual futures derivatives indicators from **Binance Futures** (public data, no API key required).
+    """)
+
+    @st.cache_data(ttl=600)
+    def load_futures_data():
+        """Load all Binance Futures data for RLSUSDT."""
+        return binance_futures.get_all_futures_data()
+
+    @st.cache_data(ttl=600)
+    def load_futures_klines(interval, limit=100):
+        """Load kline data for a specific interval."""
+        return binance_futures.get_klines(interval=interval, limit=limit)
+
+    with st.spinner("Loading futures data from Binance..."):
+        futures_data = load_futures_data()
+
+    ticker = futures_data.get("ticker", {})
+    oi_data = futures_data.get("open_interest", {})
+    oi_hist = futures_data.get("open_interest_history", {})
+    funding = futures_data.get("funding_rate", {})
+    ls_ratio = futures_data.get("long_short_ratio", {})
+    taker_data = futures_data.get("taker_buy_sell", {})
+
+    # --- KPI Row 1 ---
+    if not (isinstance(ticker, dict) and "error" in ticker):
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric(label="Futures Price", value=f"${ticker.get('last_price', 0):.4f}")
+        with col2:
+            pct = ticker.get("price_change_pct", 0)
+            st.metric(label="24h Change", value=f"{pct:+.2f}%")
+        with col3:
+            qv = ticker.get("quote_volume", 0)
+            if qv >= 1_000_000:
+                vol_str = f"${qv / 1_000_000:.2f}M"
+            elif qv >= 1_000:
+                vol_str = f"${qv / 1_000:.2f}K"
+            else:
+                vol_str = f"${qv:,.2f}"
+            st.metric(label="24h Volume (USDT)", value=vol_str)
+        with col4:
+            if not (isinstance(oi_data, dict) and "error" in oi_data):
+                oi_val = oi_data.get("open_interest", 0)
+                st.metric(label="Open Interest", value=f"{oi_val:,.0f} RLS")
+            else:
+                st.metric(label="Open Interest", value="N/A")
+
+        # --- KPI Row 2 ---
+        col5, col6, col7, col8 = st.columns(4)
+        with col5:
+            st.metric(label="Weighted Avg Price", value=f"${ticker.get('weighted_avg_price', 0):.4f}")
+        with col6:
+            st.metric(label="24h High", value=f"${ticker.get('high', 0):.4f}")
+        with col7:
+            st.metric(label="24h Low", value=f"${ticker.get('low', 0):.4f}")
+        with col8:
+            st.metric(label="24h Trade Count", value=f"{ticker.get('trade_count', 0):,}")
+    else:
+        st.warning(f"Unable to load ticker data: {ticker.get('error', 'Unknown error')}")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # --- Candlestick Chart ---
+    st.markdown("#### Price Chart (Candlestick + Volume)")
+    candle_interval = st.selectbox("Interval", ["1d", "4h", "1h"], index=0, key="futures_candle_interval")
+    candle_limit = {"1d": 60, "4h": 120, "1h": 168}.get(candle_interval, 60)
+    klines_df = load_futures_klines(candle_interval, limit=candle_limit)
+
+    if isinstance(klines_df, pd.DataFrame) and not klines_df.empty:
+        import plotly.graph_objects as go
+        from plotly.subplots import make_subplots
+
+        fig_candle = make_subplots(
+            rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.03,
+            row_heights=[0.7, 0.3],
+        )
+        fig_candle.add_trace(
+            go.Candlestick(
+                x=klines_df["timestamp"],
+                open=klines_df["open"],
+                high=klines_df["high"],
+                low=klines_df["low"],
+                close=klines_df["close"],
+                increasing_line_color="#68d391",
+                decreasing_line_color="#fc8181",
+                name="Price",
+            ),
+            row=1, col=1,
+        )
+        colors = ["#68d391" if c >= o else "#fc8181" for c, o in zip(klines_df["close"], klines_df["open"])]
+        fig_candle.add_trace(
+            go.Bar(
+                x=klines_df["timestamp"],
+                y=klines_df["volume"],
+                marker_color=colors,
+                name="Volume",
+                opacity=0.6,
+            ),
+            row=2, col=1,
+        )
+        fig_candle.update_layout(
+            height=550,
+            plot_bgcolor="rgba(0,0,0,0)",
+            paper_bgcolor="rgba(0,0,0,0)",
+            xaxis_rangeslider_visible=False,
+            showlegend=False,
+        )
+        fig_candle.update_xaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
+        fig_candle.update_yaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
+        st.plotly_chart(fig_candle, use_container_width=True)
+    elif isinstance(klines_df, dict) and "error" in klines_df:
+        st.warning(f"Unable to load kline data: {klines_df['error']}")
+    else:
+        st.info("No kline data available.")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # --- Derivatives Indicators (2x2 grid) ---
+    st.markdown("#### Derivatives Indicators")
+    ind_col1, ind_col2 = st.columns(2)
+
+    # Funding Rate History
+    with ind_col1:
+        st.markdown("##### Funding Rate History")
+        if isinstance(funding, dict) and "error" not in funding:
+            funding_df = funding["df"]
+            funding_df["color"] = funding_df["funding_rate"].apply(lambda x: "Positive" if x >= 0 else "Negative")
+            fig_funding = px.bar(
+                funding_df,
+                x="timestamp",
+                y="funding_rate",
+                color="color",
+                color_discrete_map={"Positive": "#68d391", "Negative": "#fc8181"},
+            )
+            fig_funding.add_hline(y=0, line_dash="dash", line_color="white", opacity=0.4)
+            fig_funding.update_layout(
+                height=350,
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+                showlegend=False,
+                xaxis_title="",
+                yaxis_title="Funding Rate",
+            )
+            fig_funding.update_xaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
+            fig_funding.update_yaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
+            st.plotly_chart(fig_funding, use_container_width=True)
+            st.caption(f"Current: {funding['current_rate']:.6f} | Avg: {funding['avg_rate']:.6f}")
+        else:
+            error_msg = funding.get("error", "Unknown error") if isinstance(funding, dict) else "Unknown error"
+            st.info(f"Funding rate data unavailable: {error_msg}")
+
+    # Open Interest Trend
+    with ind_col2:
+        st.markdown("##### Open Interest Trend")
+        if isinstance(oi_hist, pd.DataFrame) and not oi_hist.empty:
+            fig_oi = px.area(
+                oi_hist,
+                x="timestamp",
+                y="open_interest",
+                color_discrete_sequence=["#4299e1"],
+            )
+            fig_oi.update_layout(
+                height=350,
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+                xaxis_title="",
+                yaxis_title="Open Interest (RLS)",
+            )
+            fig_oi.update_xaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
+            fig_oi.update_yaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
+            st.plotly_chart(fig_oi, use_container_width=True)
+        elif isinstance(oi_hist, dict) and "error" in oi_hist:
+            st.info(f"OI history unavailable: {oi_hist['error']}")
+        else:
+            st.info("No open interest history data available.")
+
+    ind_col3, ind_col4 = st.columns(2)
+
+    # Long/Short Ratio
+    with ind_col3:
+        st.markdown("##### Long/Short Ratio (Top Traders)")
+        if isinstance(ls_ratio, dict) and "error" not in ls_ratio:
+            ls_df = ls_ratio["df"]
+            import plotly.graph_objects as go
+            fig_ls = go.Figure()
+            fig_ls.add_trace(go.Bar(
+                x=ls_df["timestamp"], y=ls_df["long_account"],
+                name="Long %", marker_color="#68d391",
+            ))
+            fig_ls.add_trace(go.Bar(
+                x=ls_df["timestamp"], y=ls_df["short_account"],
+                name="Short %", marker_color="#fc8181",
+            ))
+            fig_ls.add_trace(go.Scatter(
+                x=ls_df["timestamp"], y=ls_df["long_short_ratio"],
+                name="L/S Ratio", yaxis="y2",
+                line=dict(color="#4299e1", width=2),
+            ))
+            fig_ls.update_layout(
+                height=350,
+                barmode="stack",
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                xaxis_title="",
+                yaxis=dict(title="Account %", showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)"),
+                yaxis2=dict(title="Ratio", overlaying="y", side="right", showgrid=False),
+            )
+            fig_ls.update_xaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
+            st.plotly_chart(fig_ls, use_container_width=True)
+            st.caption(f"Latest L/S Ratio: {ls_ratio['latest_ratio']:.4f} — Signal: **{ls_ratio['signal']}**")
+        else:
+            error_msg = ls_ratio.get("error", "Unknown error") if isinstance(ls_ratio, dict) else "Unknown error"
+            st.info(f"Long/Short ratio data unavailable: {error_msg}")
+
+    # Taker Buy/Sell Ratio
+    with ind_col4:
+        st.markdown("##### Taker Buy/Sell Volume Ratio")
+        if isinstance(taker_data, dict) and "error" not in taker_data:
+            taker_df = taker_data["df"]
+            import plotly.graph_objects as go
+            fig_taker = go.Figure()
+            fig_taker.add_trace(go.Bar(
+                x=taker_df["timestamp"], y=taker_df["buy_vol"],
+                name="Buy Vol", marker_color="#68d391",
+            ))
+            fig_taker.add_trace(go.Bar(
+                x=taker_df["timestamp"], y=taker_df["sell_vol"],
+                name="Sell Vol", marker_color="#fc8181",
+            ))
+            fig_taker.add_trace(go.Scatter(
+                x=taker_df["timestamp"], y=taker_df["buy_sell_ratio"],
+                name="B/S Ratio", yaxis="y2",
+                line=dict(color="#4299e1", width=2),
+            ))
+            fig_taker.update_layout(
+                height=350,
+                barmode="stack",
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                xaxis_title="",
+                yaxis=dict(title="Volume", showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)"),
+                yaxis2=dict(title="Ratio", overlaying="y", side="right", showgrid=False),
+            )
+            fig_taker.update_xaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
+            st.plotly_chart(fig_taker, use_container_width=True)
+            st.caption(f"Latest B/S Ratio: {taker_data['latest_ratio']:.4f} — Signal: **{taker_data['signal']}**")
+        else:
+            error_msg = taker_data.get("error", "Unknown error") if isinstance(taker_data, dict) else "Unknown error"
+            st.info(f"Taker buy/sell data unavailable: {error_msg}")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # --- Market Signal Summary ---
+    st.markdown("#### Market Signal Summary")
+    signal_result = binance_futures.compute_market_signal(futures_data)
+    overall = signal_result["overall_signal"]
+    score = signal_result["signal_score"]
+    factors = signal_result["factors"]
+
+    signal_colors = {"Bullish": "#68d391", "Bearish": "#fc8181", "Neutral": "#ecc94b"}
+    signal_color = signal_colors.get(overall, "#ecc94b")
+
+    st.markdown(f"""
+    <div class="metric-card" style="border-left: 4px solid {signal_color}; padding: 1.5rem;">
+        <div class="metric-label">OVERALL SIGNAL</div>
+        <div class="metric-value" style="color: {signal_color};">{overall}</div>
+        <div style="color: #cbd5e1; font-size: 1rem;">Score: {score:+.3f} (range: -1.0 bearish to +1.0 bullish)</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    if factors:
+        factors_df = pd.DataFrame(factors)
+        factors_df.columns = ["Factor", "Value", "Signal", "Weight", "Score"]
+        st.dataframe(factors_df, use_container_width=True, hide_index=True)
+
+        if overall == "Bullish":
+            st.markdown("""
+            > **Interpretation:** The weighted derivatives indicators lean bullish. Longs are dominant and/or buying pressure
+            > exceeds selling pressure. Monitor funding rate for signs of overleveraged positioning.
+            """)
+        elif overall == "Bearish":
+            st.markdown("""
+            > **Interpretation:** The weighted derivatives indicators lean bearish. Shorts are dominant and/or selling pressure
+            > exceeds buying pressure. Watch for potential short squeezes if OI remains high.
+            """)
+        else:
+            st.markdown("""
+            > **Interpretation:** Derivatives indicators are mixed with no strong directional bias.
+            > Market is in a consolidation phase. Watch for a breakout in either direction.
+            """)
+
+# Tab 7: Whale Tracker
+with tab7:
+    st.markdown('<div class="section-header">Whale Tracker</div>', unsafe_allow_html=True)
+    st.markdown("""
+    Monitor whale behavior, accumulation patterns, and exchange flows for Rayls (RLS). Data powered by **Etherscan API**.
+    """)
+
+    rayls_contract = "0xB5F7b021a78f470d31D762C1DDA05ea549904fbd"
+    rayls_chain = "eth"
+
+    @st.cache_data(ttl=600)
+    def load_whale_data():
+        """Load whale tracker data for Rayls."""
+        whale_transfers = etherscan.get_whale_transfers(rayls_contract, rayls_chain, min_tokens=100000, limit=50)
+        accumulation = etherscan.get_whale_accumulation_indicator(rayls_contract, rayls_chain, days=7)
+        exchange_flow = etherscan.get_exchange_flow_analysis(rayls_contract, rayls_chain, days=7)
+        return whale_transfers, accumulation, exchange_flow
+
+    with st.spinner("Loading whale tracker data from Etherscan..."):
+        whale_transfers_data, accumulation_data, exchange_flow_data = load_whale_data()
+
+    # Section 1: Accumulation Score
+    if isinstance(accumulation_data, dict) and "error" not in accumulation_data:
+        st.markdown('<div class="section-header">Whale Accumulation Indicator (7 Days)</div>', unsafe_allow_html=True)
+
+        score = accumulation_data.get("score", 0)
+        acc_count = accumulation_data.get("accumulating_count", 0)
+        dist_count = accumulation_data.get("distributing_count", 0)
+        neutral_count = accumulation_data.get("neutral_count", 0)
+
+        # Determine signal
+        if score > 0.2:
+            signal_text = "Bullish"
+            signal_color = "#68d391"
+        elif score < -0.2:
+            signal_text = "Bearish"
+            signal_color = "#feb2b2"
+        else:
+            signal_text = "Neutral"
+            signal_color = "#e2e8f0"
+
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            st.metric(
+                label="Accumulation Score",
+                value=f"{score:+.2f}",
+                help="Ranges from -1.0 (all distributing) to +1.0 (all accumulating)"
+            )
+
+        with col2:
+            st.metric(
+                label="Accumulating Wallets",
+                value=f"{acc_count}",
+            )
+
+        with col3:
+            st.metric(
+                label="Distributing Wallets",
+                value=f"{dist_count}",
+            )
+
+        with col4:
+            st.markdown(f"""
+            <div class="metric-card">
+                <div class="metric-label">SIGNAL</div>
+                <div class="metric-value" style="color: {signal_color};">{signal_text}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Top 20 Addresses Net Flow - horizontal bar
+        st.markdown("#### Top 20 Addresses by Volume - Net Flow")
+
+        top_addresses = accumulation_data.get("top_addresses", [])
+        if top_addresses:
+            addr_df = pd.DataFrame(top_addresses)
+            addr_df["short_address"] = addr_df["address"].apply(lambda x: f"{x[:6]}...{x[-4:]}")
+            addr_df["bar_color"] = addr_df["status"].map({
+                "Accumulating": "#22c55e",
+                "Distributing": "#ef4444",
+                "Neutral": "#94a3b8",
+            })
+
+            import plotly.graph_objects as go
+
+            fig_whale_flow = go.Figure()
+
+            for _, row in addr_df.iterrows():
+                fig_whale_flow.add_trace(go.Bar(
+                    x=[row["net_flow"]],
+                    y=[row["short_address"]],
+                    orientation="h",
+                    marker=dict(color=row["bar_color"]),
+                    name=row["status"],
+                    showlegend=False,
+                    hovertemplate=f"<b>{row['address']}</b><br>Net Flow: {row['net_flow']:,.2f}<br>Status: {row['status']}<extra></extra>",
+                ))
+
+            fig_whale_flow.update_layout(
+                height=500,
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+                xaxis_title="Net Token Flow (positive = accumulating)",
+                yaxis_title="",
+                margin=dict(l=120),
+            )
+            fig_whale_flow.update_xaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
+
+            # Add legend manually
+            fig_whale_flow.add_trace(go.Bar(x=[None], y=[None], marker=dict(color="#22c55e"), name="Accumulating", showlegend=True))
+            fig_whale_flow.add_trace(go.Bar(x=[None], y=[None], marker=dict(color="#ef4444"), name="Distributing", showlegend=True))
+            fig_whale_flow.add_trace(go.Bar(x=[None], y=[None], marker=dict(color="#94a3b8"), name="Neutral", showlegend=True))
+
+            fig_whale_flow.update_layout(
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            )
+
+            st.plotly_chart(fig_whale_flow, use_container_width=True)
+        else:
+            st.info("No address flow data available.")
+    else:
+        error_msg = accumulation_data.get("error", "Unknown error") if isinstance(accumulation_data, dict) else "Unknown error"
+        st.warning(f"Unable to load accumulation data: {error_msg}")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # Section 2: Recent Large Transfers
+    st.markdown('<div class="section-header">Recent Large Transfers (>100K tokens)</div>', unsafe_allow_html=True)
+
+    if isinstance(whale_transfers_data, list) and whale_transfers_data:
+        whale_df = pd.DataFrame(whale_transfers_data)
+        st.dataframe(
+            whale_df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "hash": st.column_config.TextColumn("Tx Hash", width="medium"),
+                "from": st.column_config.TextColumn("From", width="medium"),
+                "to": st.column_config.TextColumn("To", width="medium"),
+                "value": st.column_config.NumberColumn("Value (tokens)", format="%.2f"),
+                "timestamp": st.column_config.TextColumn("Timestamp", width="small"),
+            },
+        )
+    elif isinstance(whale_transfers_data, dict) and "error" in whale_transfers_data:
+        st.warning(f"Unable to load whale transfers: {whale_transfers_data['error']}")
+    else:
+        st.info("No large whale transfers found in the last 30 days.")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # Section 3: Exchange Flow Analysis
+    st.markdown('<div class="section-header">Exchange Flow Analysis (7 Days)</div>', unsafe_allow_html=True)
+
+    if isinstance(exchange_flow_data, dict) and "error" not in exchange_flow_data:
+        total_inflow = exchange_flow_data.get("total_inflow", 0)
+        total_outflow = exchange_flow_data.get("total_outflow", 0)
+        net_flow = exchange_flow_data.get("net_flow", 0)
+        flow_signal = exchange_flow_data.get("signal", "Neutral")
+
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            st.metric(
+                label="Exchange Inflow",
+                value=format_currency(total_inflow) if total_inflow else "0",
+                help="Tokens sent TO exchanges (selling pressure)"
+            )
+
+        with col2:
+            st.metric(
+                label="Exchange Outflow",
+                value=format_currency(total_outflow) if total_outflow else "0",
+                help="Tokens sent FROM exchanges (buying/accumulation)"
+            )
+
+        with col3:
+            st.metric(
+                label="Net Flow",
+                value=format_currency(abs(net_flow)) if net_flow else "0",
+                delta=f"{'Outflow' if net_flow > 0 else 'Inflow'}" if net_flow != 0 else None,
+                delta_color="normal" if net_flow > 0 else "inverse"
+            )
+
+        with col4:
+            if flow_signal == "Bullish":
+                signal_color = "#68d391"
+                signal_desc = "Net outflow from exchanges (accumulation)"
+            elif flow_signal == "Bearish":
+                signal_color = "#feb2b2"
+                signal_desc = "Net inflow to exchanges (selling pressure)"
+            else:
+                signal_color = "#e2e8f0"
+                signal_desc = "Balanced exchange flows"
+
+            st.markdown(f"""
+            <div class="metric-card">
+                <div class="metric-label">EXCHANGE SIGNAL</div>
+                <div class="metric-value" style="color: {signal_color};">{flow_signal}</div>
+                <div style="color: #94a3b8; font-size: 0.8rem; margin-top: 0.25rem;">{signal_desc}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Exchange flow bar chart
+        exchange_flows = exchange_flow_data.get("exchange_flows", {})
+        if exchange_flows:
+            st.markdown("#### Inflow vs Outflow by Exchange")
+
+            exchange_chart_data = []
+            for exchange_name, flows in exchange_flows.items():
+                exchange_chart_data.append({"Exchange": exchange_name, "Flow": flows["inflow"], "Type": "Inflow (Selling)"})
+                exchange_chart_data.append({"Exchange": exchange_name, "Flow": flows["outflow"], "Type": "Outflow (Buying)"})
+
+            if exchange_chart_data:
+                exchange_df = pd.DataFrame(exchange_chart_data)
+
+                fig_exchange = px.bar(
+                    exchange_df,
+                    x="Exchange",
+                    y="Flow",
+                    color="Type",
+                    barmode="group",
+                    color_discrete_map={"Inflow (Selling)": "#ef4444", "Outflow (Buying)": "#22c55e"},
+                )
+                fig_exchange.update_layout(
+                    height=400,
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    yaxis_title="Token Volume",
+                    xaxis_title="",
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, title=""),
+                )
+                fig_exchange.update_yaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
+                st.plotly_chart(fig_exchange, use_container_width=True)
+        else:
+            st.info("No exchange flow data detected. This may indicate Rayls tokens are not actively traded on major centralized exchanges tracked.")
+
+        # Interpretation
+        st.markdown("---")
+        st.markdown("""
+        **How to read Exchange Flows:**
+        - **Inflow** (tokens sent TO exchanges) = potential **selling pressure** as holders move tokens to exchanges to sell
+        - **Outflow** (tokens sent FROM exchanges) = potential **buying/accumulation** as buyers withdraw tokens to hold
+        - **Net Outflow** is generally **bullish** — more tokens leaving exchanges than entering
+        - **Net Inflow** is generally **bearish** — more tokens entering exchanges, potentially for selling
+        """)
+    else:
+        error_msg = exchange_flow_data.get("error", "Unknown error") if isinstance(exchange_flow_data, dict) else "Unknown error"
+        st.warning(f"Unable to load exchange flow data: {error_msg}")
+
 # Footer with refresh button
 st.markdown("<br>", unsafe_allow_html=True)
 st.divider()
@@ -2432,6 +2984,6 @@ with col2:
 
 st.markdown("""
 <div style="text-align: center; color: #64748b; font-size: 0.85rem; margin-top: 1rem;">
-    Data refreshes automatically every 5 minutes • Prices from CoinMarketCap • Historical data from CoinGecko • Holder data from Moralis
+    Data refreshes automatically every 5 minutes • Prices from CoinMarketCap • Historical data from CoinGecko • Holder data from Moralis • Futures data from Binance • On-chain data from Etherscan
 </div>
 """, unsafe_allow_html=True)
