@@ -2424,346 +2424,551 @@ with tab5:
 
 # Tab 6: Market Analytics (Kraken)
 with tab6:
-    st.markdown('<div class="section-header">RLSUSD Market Analytics</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">Market Analytics (Kraken)</div>', unsafe_allow_html=True)
     st.markdown("""
-    Track RLSUSD spot market indicators from **Kraken** (public data, no API key required, globally accessible).
+    Spot market analytics for Rayls and peer tokens from **Kraken** (public data, no API key required, globally accessible).
+    Tokens not listed on Kraken are automatically skipped.
     """)
 
     @st.cache_data(ttl=600)
-    def load_kraken_data():
-        """Load all Kraken market data for RLSUSD."""
-        return kraken_market.get_all_market_data()
+    def load_peer_comparison():
+        """Load comparison data for all tokens on Kraken."""
+        return kraken_market.get_peer_comparison()
 
     @st.cache_data(ttl=600)
-    def load_kraken_ohlc(interval, limit=100):
-        """Load OHLC data for a specific interval."""
-        return kraken_market.get_ohlc(interval=interval, limit=limit)
+    def load_kraken_ohlc(pair, interval, limit=100):
+        """Load OHLC data for a specific pair and interval."""
+        return kraken_market.get_ohlc(pair=pair, interval=interval, limit=limit)
 
-    with st.spinner("Loading market data from Kraken..."):
-        kraken_data = load_kraken_data()
+    @st.cache_data(ttl=600)
+    def load_kraken_full(pair):
+        """Load full market data for a single token."""
+        return kraken_market.get_all_market_data(pair)
 
-    ticker = kraken_data.get("ticker", {})
-    order_book = kraken_data.get("order_book", {})
-    trades_data = kraken_data.get("trades", {})
-    spread_data = kraken_data.get("spread", {})
+    with st.spinner("Loading market data from Kraken for all tokens..."):
+        peer_data = load_peer_comparison()
 
-    # --- KPI Row 1 ---
-    if not (isinstance(ticker, dict) and "error" in ticker):
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric(label="Spot Price", value=f"${ticker.get('last_price', 0):.6f}")
-        with col2:
-            pct = ticker.get("price_change_pct", 0)
-            st.metric(label="24h Change", value=f"{pct:+.2f}%")
-        with col3:
-            vol = ticker.get("volume", 0)
-            if vol >= 1_000_000:
-                vol_str = f"{vol / 1_000_000:.2f}M RLS"
-            elif vol >= 1_000:
-                vol_str = f"{vol / 1_000:.2f}K RLS"
+    available_tokens = list(peer_data.keys())
+
+    if not available_tokens:
+        st.warning("Unable to load data from Kraken for any token.")
+    else:
+        # ============================================================
+        # SECTION 1: Peer Comparison Overview
+        # ============================================================
+        st.markdown("#### Peer Comparison Overview")
+        st.caption(f"Showing {len(available_tokens)} tokens available on Kraken. Ondo Yield Assets (USDY) is not listed on Kraken and is excluded.")
+
+        # Build comparison table
+        comp_rows = []
+        for name in available_tokens:
+            t = peer_data[name]["ticker"]
+            book = peer_data[name].get("order_book")
+            trades = peer_data[name].get("trades")
+
+            mid = (t["ask"] + t["bid"]) / 2 if (t["ask"] + t["bid"]) else 0
+            spread_bps = (t["spread"] / mid * 10000) if mid else 0
+
+            row = {
+                "Token": name,
+                "Price (USD)": t["last_price"],
+                "24h Change (%)": t["price_change_pct"],
+                "24h Volume": t["volume"],
+                "VWAP": t["vwap"],
+                "24h High": t["high"],
+                "24h Low": t["low"],
+                "Trades (24h)": t["trade_count"],
+                "Spread (bps)": round(spread_bps, 1),
+            }
+
+            if book:
+                row["Bid/Ask Ratio"] = book["bid_ask_ratio"]
+                row["Bid Vol %"] = book["bid_pct"]
             else:
-                vol_str = f"{vol:,.2f} RLS"
-            st.metric(label="24h Volume", value=vol_str)
-        with col4:
-            st.metric(label="24h Trades", value=f"{ticker.get('trade_count', 0):,}")
+                row["Bid/Ask Ratio"] = None
+                row["Bid Vol %"] = None
 
-        # --- KPI Row 2 ---
-        col5, col6, col7, col8 = st.columns(4)
-        with col5:
-            st.metric(label="VWAP", value=f"${ticker.get('vwap', 0):.6f}")
-        with col6:
-            st.metric(label="24h High", value=f"${ticker.get('high', 0):.6f}")
-        with col7:
-            st.metric(label="24h Low", value=f"${ticker.get('low', 0):.6f}")
-        with col8:
-            spread = ticker.get("spread", 0)
-            bid = ticker.get("bid", 0)
-            ask = ticker.get("ask", 0)
-            mid = (bid + ask) / 2 if (bid + ask) else 0
-            spread_bps = (spread / mid * 10000) if mid else 0
-            st.metric(label="Bid-Ask Spread", value=f"${spread:.6f}", help=f"{spread_bps:.1f} bps")
-    else:
-        st.warning(f"Unable to load ticker data: {ticker.get('error', 'Unknown error')}")
+            if trades:
+                row["Buy/Sell Ratio"] = trades["buy_sell_ratio"]
+                row["Buy Vol %"] = trades["buy_pct"]
+            else:
+                row["Buy/Sell Ratio"] = None
+                row["Buy Vol %"] = None
 
-    st.markdown("<br>", unsafe_allow_html=True)
+            comp_rows.append(row)
 
-    # --- Candlestick Chart ---
-    st.markdown("#### Price Chart (Candlestick + Volume)")
-    candle_interval = st.selectbox("Interval", ["1d", "4h", "1h"], index=0, key="kraken_candle_interval")
-    candle_limit = {"1d": 60, "4h": 120, "1h": 168}.get(candle_interval, 60)
-    klines_df = load_kraken_ohlc(candle_interval, limit=candle_limit)
+        comp_df = pd.DataFrame(comp_rows)
 
-    if isinstance(klines_df, pd.DataFrame) and not klines_df.empty:
+        st.dataframe(
+            comp_df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Price (USD)": st.column_config.NumberColumn(format="$%.6f"),
+                "24h Change (%)": st.column_config.NumberColumn(format="%.2f%%"),
+                "24h Volume": st.column_config.NumberColumn(format="%.0f"),
+                "VWAP": st.column_config.NumberColumn(format="$%.6f"),
+                "24h High": st.column_config.NumberColumn(format="$%.6f"),
+                "24h Low": st.column_config.NumberColumn(format="$%.6f"),
+                "Trades (24h)": st.column_config.NumberColumn(format="%d"),
+                "Spread (bps)": st.column_config.NumberColumn(format="%.1f"),
+                "Bid/Ask Ratio": st.column_config.NumberColumn(format="%.4f"),
+                "Bid Vol %": st.column_config.NumberColumn(format="%.1f%%"),
+                "Buy/Sell Ratio": st.column_config.NumberColumn(format="%.4f"),
+                "Buy Vol %": st.column_config.NumberColumn(format="%.1f%%"),
+            },
+        )
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # --- Comparison Charts (2x2) ---
         import plotly.graph_objects as go
-        from plotly.subplots import make_subplots
 
-        fig_candle = make_subplots(
-            rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.03,
-            row_heights=[0.7, 0.3],
-        )
-        fig_candle.add_trace(
-            go.Candlestick(
-                x=klines_df["timestamp"],
-                open=klines_df["open"],
-                high=klines_df["high"],
-                low=klines_df["low"],
-                close=klines_df["close"],
-                increasing_line_color="#68d391",
-                decreasing_line_color="#fc8181",
-                name="Price",
-            ),
-            row=1, col=1,
-        )
-        colors = ["#68d391" if c >= o else "#fc8181" for c, o in zip(klines_df["close"], klines_df["open"])]
-        fig_candle.add_trace(
-            go.Bar(
-                x=klines_df["timestamp"],
-                y=klines_df["volume"],
-                marker_color=colors,
-                name="Volume",
-                opacity=0.6,
-            ),
-            row=2, col=1,
-        )
-        fig_candle.update_layout(
-            height=550,
-            plot_bgcolor="rgba(0,0,0,0)",
-            paper_bgcolor="rgba(0,0,0,0)",
-            xaxis_rangeslider_visible=False,
-            showlegend=False,
-        )
-        fig_candle.update_xaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
-        fig_candle.update_yaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
-        st.plotly_chart(fig_candle, use_container_width=True)
-    elif isinstance(klines_df, dict) and "error" in klines_df:
-        st.warning(f"Unable to load OHLC data: {klines_df['error']}")
-    else:
-        st.info("No OHLC data available.")
+        comp_chart_col1, comp_chart_col2 = st.columns(2)
 
-    st.markdown("<br>", unsafe_allow_html=True)
+        # 24h Price Change comparison
+        with comp_chart_col1:
+            st.markdown("##### 24h Price Change (%)")
+            names = [r["Token"] for r in comp_rows]
+            changes = [r["24h Change (%)"] for r in comp_rows]
+            bar_colors = ["#68d391" if c >= 0 else "#fc8181" for c in changes]
 
-    # --- Market Indicators (2x2 grid) ---
-    st.markdown("#### Market Indicators")
-    ind_col1, ind_col2 = st.columns(2)
-
-    # Order Book Depth
-    with ind_col1:
-        st.markdown("##### Order Book Depth")
-        if isinstance(order_book, dict) and "error" not in order_book:
-            import plotly.graph_objects as go
-
-            asks = order_book["asks"]
-            bids = order_book["bids"]
-
-            # Cumulative depth chart
-            bid_prices = [b["price"] for b in sorted(bids, key=lambda x: x["price"], reverse=True)]
-            bid_cum = []
-            cumsum = 0
-            for b in sorted(bids, key=lambda x: x["price"], reverse=True):
-                cumsum += b["volume"]
-                bid_cum.append(cumsum)
-
-            ask_prices = [a["price"] for a in sorted(asks, key=lambda x: x["price"])]
-            ask_cum = []
-            cumsum = 0
-            for a in sorted(asks, key=lambda x: x["price"]):
-                cumsum += a["volume"]
-                ask_cum.append(cumsum)
-
-            fig_depth = go.Figure()
-            fig_depth.add_trace(go.Scatter(
-                x=bid_prices, y=bid_cum,
-                fill="tozeroy", name="Bids",
-                line=dict(color="#68d391"), fillcolor="rgba(104,211,145,0.3)",
+            fig_change = go.Figure(go.Bar(
+                x=names, y=changes,
+                marker_color=bar_colors,
+                text=[f"{c:+.2f}%" for c in changes],
+                textposition="outside",
             ))
-            fig_depth.add_trace(go.Scatter(
-                x=ask_prices, y=ask_cum,
-                fill="tozeroy", name="Asks",
-                line=dict(color="#fc8181"), fillcolor="rgba(252,129,129,0.3)",
-            ))
-            fig_depth.update_layout(
+            fig_change.add_hline(y=0, line_dash="dash", line_color="white", opacity=0.3)
+            fig_change.update_layout(
                 height=350,
                 plot_bgcolor="rgba(0,0,0,0)",
                 paper_bgcolor="rgba(0,0,0,0)",
-                xaxis_title="Price (USD)",
-                yaxis_title="Cumulative Volume (RLS)",
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                xaxis_title="", yaxis_title="Change (%)",
+                showlegend=False,
             )
-            fig_depth.update_xaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
-            fig_depth.update_yaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
-            st.plotly_chart(fig_depth, use_container_width=True)
+            fig_change.update_xaxes(showgrid=False)
+            fig_change.update_yaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
+            st.plotly_chart(fig_change, use_container_width=True)
 
-            bid_pct = order_book.get("bid_pct", 50)
-            ask_pct = order_book.get("ask_pct", 50)
-            ratio = order_book.get("bid_ask_ratio", 1.0)
-            signal = "Bullish" if ratio > 1.2 else ("Bearish" if ratio < 0.8 else "Neutral")
-            st.caption(f"Bid Volume: {bid_pct:.0f}% | Ask Volume: {ask_pct:.0f}% | Ratio: {ratio:.4f} — **{signal}**")
-        else:
-            error_msg = order_book.get("error", "Unknown error") if isinstance(order_book, dict) else "Unknown error"
-            st.info(f"Order book data unavailable: {error_msg}")
+        # Buy/Sell Ratio comparison
+        with comp_chart_col2:
+            st.markdown("##### Buy/Sell Volume Ratio (Recent Trades)")
+            bs_names = [r["Token"] for r in comp_rows if r.get("Buy/Sell Ratio") is not None]
+            bs_ratios = [r["Buy/Sell Ratio"] for r in comp_rows if r.get("Buy/Sell Ratio") is not None]
+            bs_colors = ["#68d391" if r >= 1.0 else "#fc8181" for r in bs_ratios]
 
-    # Trade Buy/Sell Breakdown
-    with ind_col2:
-        st.markdown("##### Buy vs Sell Volume (Recent Trades)")
-        if isinstance(trades_data, dict) and "error" not in trades_data:
-            import plotly.graph_objects as go
-
-            buy_vol = trades_data.get("buy_volume", 0)
-            sell_vol = trades_data.get("sell_volume", 0)
-            buy_count = trades_data.get("buy_count", 0)
-            sell_count = trades_data.get("sell_count", 0)
-
-            fig_bs = go.Figure()
-            fig_bs.add_trace(go.Bar(
-                x=["Volume (RLS)"], y=[buy_vol],
-                name="Buy Volume", marker_color="#68d391",
-            ))
-            fig_bs.add_trace(go.Bar(
-                x=["Volume (RLS)"], y=[sell_vol],
-                name="Sell Volume", marker_color="#fc8181",
-            ))
-            fig_bs.add_trace(go.Bar(
-                x=["Trade Count"], y=[buy_count],
-                name="Buy Trades", marker_color="#68d391", showlegend=False,
-            ))
-            fig_bs.add_trace(go.Bar(
-                x=["Trade Count"], y=[sell_count],
-                name="Sell Trades", marker_color="#fc8181", showlegend=False,
-            ))
-            fig_bs.update_layout(
-                height=350,
-                barmode="group",
-                plot_bgcolor="rgba(0,0,0,0)",
-                paper_bgcolor="rgba(0,0,0,0)",
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                yaxis_title="",
-            )
-            fig_bs.update_yaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
-            st.plotly_chart(fig_bs, use_container_width=True)
-
-            ratio = trades_data.get("buy_sell_ratio", 1.0)
-            buy_pct = trades_data.get("buy_pct", 50)
-            signal = "Bullish" if ratio > 1.1 else ("Bearish" if ratio < 0.9 else "Neutral")
-            st.caption(f"Buy/Sell Ratio: {ratio:.4f} ({buy_pct:.0f}% buys) — **{signal}**")
-        else:
-            error_msg = trades_data.get("error", "Unknown error") if isinstance(trades_data, dict) else "Unknown error"
-            st.info(f"Trade data unavailable: {error_msg}")
-
-    ind_col3, ind_col4 = st.columns(2)
-
-    # Spread History
-    with ind_col3:
-        st.markdown("##### Bid-Ask Spread History")
-        if isinstance(spread_data, dict) and "error" not in spread_data:
-            spread_df = spread_data.get("df", pd.DataFrame())
-            if not spread_df.empty:
-                fig_spread = px.area(
-                    spread_df,
-                    x="timestamp",
-                    y="spread_bps",
-                    color_discrete_sequence=["#4299e1"],
-                )
-                fig_spread.update_layout(
+            if bs_names:
+                fig_bs_comp = go.Figure(go.Bar(
+                    x=bs_names, y=bs_ratios,
+                    marker_color=bs_colors,
+                    text=[f"{r:.2f}" for r in bs_ratios],
+                    textposition="outside",
+                ))
+                fig_bs_comp.add_hline(y=1.0, line_dash="dash", line_color="#ecc94b", opacity=0.6,
+                                      annotation_text="Neutral (1.0)", annotation_position="top right")
+                fig_bs_comp.update_layout(
                     height=350,
                     plot_bgcolor="rgba(0,0,0,0)",
                     paper_bgcolor="rgba(0,0,0,0)",
-                    xaxis_title="",
-                    yaxis_title="Spread (basis points)",
+                    xaxis_title="", yaxis_title="Buy/Sell Ratio",
+                    showlegend=False,
                 )
-                fig_spread.update_xaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
-                fig_spread.update_yaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
-                st.plotly_chart(fig_spread, use_container_width=True)
-                st.caption(f"Current: {spread_data.get('current_spread_bps', 0):.1f} bps | Avg: {spread_data.get('avg_spread_bps', 0):.1f} bps")
+                fig_bs_comp.update_xaxes(showgrid=False)
+                fig_bs_comp.update_yaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
+                st.plotly_chart(fig_bs_comp, use_container_width=True)
             else:
-                st.info("No spread history data available.")
+                st.info("No trade data available for comparison.")
+
+        comp_chart_col3, comp_chart_col4 = st.columns(2)
+
+        # Order Book Imbalance comparison
+        with comp_chart_col3:
+            st.markdown("##### Order Book Imbalance (Bid/Ask Ratio)")
+            ob_names = [r["Token"] for r in comp_rows if r.get("Bid/Ask Ratio") is not None]
+            ob_ratios = [r["Bid/Ask Ratio"] for r in comp_rows if r.get("Bid/Ask Ratio") is not None]
+            ob_colors = ["#68d391" if r >= 1.0 else "#fc8181" for r in ob_ratios]
+
+            if ob_names:
+                fig_ob_comp = go.Figure(go.Bar(
+                    x=ob_names, y=ob_ratios,
+                    marker_color=ob_colors,
+                    text=[f"{r:.2f}" for r in ob_ratios],
+                    textposition="outside",
+                ))
+                fig_ob_comp.add_hline(y=1.0, line_dash="dash", line_color="#ecc94b", opacity=0.6,
+                                      annotation_text="Balanced (1.0)", annotation_position="top right")
+                fig_ob_comp.update_layout(
+                    height=350,
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    xaxis_title="", yaxis_title="Bid/Ask Ratio",
+                    showlegend=False,
+                )
+                fig_ob_comp.update_xaxes(showgrid=False)
+                fig_ob_comp.update_yaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
+                st.plotly_chart(fig_ob_comp, use_container_width=True)
+            else:
+                st.info("No order book data available for comparison.")
+
+        # Spread comparison
+        with comp_chart_col4:
+            st.markdown("##### Bid-Ask Spread (bps)")
+            sp_names = [r["Token"] for r in comp_rows]
+            sp_bps = [r["Spread (bps)"] for r in comp_rows]
+            # Lower spread = better liquidity (green), higher = worse (red)
+            sp_colors = ["#68d391" if s <= 30 else ("#ecc94b" if s <= 60 else "#fc8181") for s in sp_bps]
+
+            fig_sp_comp = go.Figure(go.Bar(
+                x=sp_names, y=sp_bps,
+                marker_color=sp_colors,
+                text=[f"{s:.1f}" for s in sp_bps],
+                textposition="outside",
+            ))
+            fig_sp_comp.update_layout(
+                height=350,
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+                xaxis_title="", yaxis_title="Spread (bps)",
+                showlegend=False,
+            )
+            fig_sp_comp.update_xaxes(showgrid=False)
+            fig_sp_comp.update_yaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
+            st.plotly_chart(fig_sp_comp, use_container_width=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # ============================================================
+        # SECTION 2: Detailed Single-Token Analysis
+        # ============================================================
+        st.markdown("---")
+        st.markdown("#### Detailed Token Analysis")
+
+        selected_token = st.selectbox(
+            "Select Token",
+            available_tokens,
+            index=available_tokens.index("Rayls") if "Rayls" in available_tokens else 0,
+            key="kraken_detail_token",
+        )
+
+        selected_pair = kraken_market.KRAKEN_PAIRS.get(selected_token, "RLSUSD")
+
+        with st.spinner(f"Loading detailed data for {selected_token}..."):
+            detail_data = load_kraken_full(selected_pair)
+
+        ticker = detail_data.get("ticker", {})
+        order_book = detail_data.get("order_book", {})
+        trades_data = detail_data.get("trades", {})
+        spread_data = detail_data.get("spread", {})
+
+        # --- KPI Rows ---
+        if not (isinstance(ticker, dict) and "error" in ticker):
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric(label="Spot Price", value=f"${ticker.get('last_price', 0):.6f}")
+            with col2:
+                pct = ticker.get("price_change_pct", 0)
+                st.metric(label="24h Change", value=f"{pct:+.2f}%")
+            with col3:
+                vol = ticker.get("volume", 0)
+                if vol >= 1_000_000:
+                    vol_str = f"{vol / 1_000_000:.2f}M"
+                elif vol >= 1_000:
+                    vol_str = f"{vol / 1_000:.2f}K"
+                else:
+                    vol_str = f"{vol:,.2f}"
+                st.metric(label="24h Volume", value=vol_str)
+            with col4:
+                st.metric(label="24h Trades", value=f"{ticker.get('trade_count', 0):,}")
+
+            col5, col6, col7, col8 = st.columns(4)
+            with col5:
+                st.metric(label="VWAP", value=f"${ticker.get('vwap', 0):.6f}")
+            with col6:
+                st.metric(label="24h High", value=f"${ticker.get('high', 0):.6f}")
+            with col7:
+                st.metric(label="24h Low", value=f"${ticker.get('low', 0):.6f}")
+            with col8:
+                spread_val = ticker.get("spread", 0)
+                bid = ticker.get("bid", 0)
+                ask = ticker.get("ask", 0)
+                mid = (bid + ask) / 2 if (bid + ask) else 0
+                spread_bps_val = (spread_val / mid * 10000) if mid else 0
+                st.metric(label="Bid-Ask Spread", value=f"${spread_val:.6f}", help=f"{spread_bps_val:.1f} bps")
         else:
-            error_msg = spread_data.get("error", "Unknown error") if isinstance(spread_data, dict) else "Unknown error"
-            st.info(f"Spread data unavailable: {error_msg}")
+            st.warning(f"Unable to load ticker data: {ticker.get('error', 'Unknown error')}")
 
-    # Trade Timeline (price colored by buy/sell)
-    with ind_col4:
-        st.markdown("##### Recent Trade Activity")
-        if isinstance(trades_data, dict) and "error" not in trades_data:
-            trade_df = trades_data.get("df", pd.DataFrame())
-            if not trade_df.empty:
-                # Resample to hourly buy/sell volume
-                trade_df_copy = trade_df.copy()
-                trade_df_copy = trade_df_copy.set_index("timestamp")
-                hourly = trade_df_copy.groupby([pd.Grouper(freq="1h"), "side"])["volume"].sum().unstack(fill_value=0).reset_index()
+        st.markdown("<br>", unsafe_allow_html=True)
 
-                if "buy" in hourly.columns or "sell" in hourly.columns:
-                    import plotly.graph_objects as go
-                    fig_timeline = go.Figure()
-                    if "buy" in hourly.columns:
-                        fig_timeline.add_trace(go.Bar(
-                            x=hourly["timestamp"], y=hourly["buy"],
-                            name="Buy Volume", marker_color="#68d391",
-                        ))
-                    if "sell" in hourly.columns:
-                        fig_timeline.add_trace(go.Bar(
-                            x=hourly["timestamp"], y=hourly["sell"],
-                            name="Sell Volume", marker_color="#fc8181",
-                        ))
-                    fig_timeline.update_layout(
+        # --- Candlestick Chart ---
+        st.markdown(f"#### {selected_token} Price Chart (Candlestick + Volume)")
+        candle_interval = st.selectbox("Interval", ["1d", "4h", "1h"], index=0, key="kraken_candle_interval")
+        candle_limit = {"1d": 60, "4h": 120, "1h": 168}.get(candle_interval, 60)
+        klines_df = load_kraken_ohlc(selected_pair, candle_interval, limit=candle_limit)
+
+        if isinstance(klines_df, pd.DataFrame) and not klines_df.empty:
+            from plotly.subplots import make_subplots
+
+            fig_candle = make_subplots(
+                rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.03,
+                row_heights=[0.7, 0.3],
+            )
+            fig_candle.add_trace(
+                go.Candlestick(
+                    x=klines_df["timestamp"],
+                    open=klines_df["open"],
+                    high=klines_df["high"],
+                    low=klines_df["low"],
+                    close=klines_df["close"],
+                    increasing_line_color="#68d391",
+                    decreasing_line_color="#fc8181",
+                    name="Price",
+                ),
+                row=1, col=1,
+            )
+            colors = ["#68d391" if c >= o else "#fc8181" for c, o in zip(klines_df["close"], klines_df["open"])]
+            fig_candle.add_trace(
+                go.Bar(
+                    x=klines_df["timestamp"],
+                    y=klines_df["volume"],
+                    marker_color=colors,
+                    name="Volume",
+                    opacity=0.6,
+                ),
+                row=2, col=1,
+            )
+            fig_candle.update_layout(
+                height=550,
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+                xaxis_rangeslider_visible=False,
+                showlegend=False,
+            )
+            fig_candle.update_xaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
+            fig_candle.update_yaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
+            st.plotly_chart(fig_candle, use_container_width=True)
+        elif isinstance(klines_df, dict) and "error" in klines_df:
+            st.warning(f"Unable to load OHLC data: {klines_df['error']}")
+        else:
+            st.info("No OHLC data available.")
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # --- Market Indicators (2x2 grid) ---
+        st.markdown(f"#### {selected_token} Market Indicators")
+        ind_col1, ind_col2 = st.columns(2)
+
+        # Order Book Depth
+        with ind_col1:
+            st.markdown("##### Order Book Depth")
+            if isinstance(order_book, dict) and "error" not in order_book:
+                asks = order_book["asks"]
+                bids = order_book["bids"]
+
+                bid_prices = [b["price"] for b in sorted(bids, key=lambda x: x["price"], reverse=True)]
+                bid_cum = []
+                cumsum = 0
+                for b in sorted(bids, key=lambda x: x["price"], reverse=True):
+                    cumsum += b["volume"]
+                    bid_cum.append(cumsum)
+
+                ask_prices = [a["price"] for a in sorted(asks, key=lambda x: x["price"])]
+                ask_cum = []
+                cumsum = 0
+                for a in sorted(asks, key=lambda x: x["price"]):
+                    cumsum += a["volume"]
+                    ask_cum.append(cumsum)
+
+                fig_depth = go.Figure()
+                fig_depth.add_trace(go.Scatter(
+                    x=bid_prices, y=bid_cum,
+                    fill="tozeroy", name="Bids",
+                    line=dict(color="#68d391"), fillcolor="rgba(104,211,145,0.3)",
+                ))
+                fig_depth.add_trace(go.Scatter(
+                    x=ask_prices, y=ask_cum,
+                    fill="tozeroy", name="Asks",
+                    line=dict(color="#fc8181"), fillcolor="rgba(252,129,129,0.3)",
+                ))
+                fig_depth.update_layout(
+                    height=350,
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    xaxis_title="Price (USD)",
+                    yaxis_title="Cumulative Volume",
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                )
+                fig_depth.update_xaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
+                fig_depth.update_yaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
+                st.plotly_chart(fig_depth, use_container_width=True)
+
+                bid_pct = order_book.get("bid_pct", 50)
+                ask_pct = order_book.get("ask_pct", 50)
+                ratio = order_book.get("bid_ask_ratio", 1.0)
+                signal = "Bullish" if ratio > 1.2 else ("Bearish" if ratio < 0.8 else "Neutral")
+                st.caption(f"Bid Volume: {bid_pct:.0f}% | Ask Volume: {ask_pct:.0f}% | Ratio: {ratio:.4f} — **{signal}**")
+            else:
+                error_msg = order_book.get("error", "Unknown error") if isinstance(order_book, dict) else "Unknown error"
+                st.info(f"Order book data unavailable: {error_msg}")
+
+        # Trade Buy/Sell Breakdown
+        with ind_col2:
+            st.markdown("##### Buy vs Sell Volume (Recent Trades)")
+            if isinstance(trades_data, dict) and "error" not in trades_data:
+                buy_vol = trades_data.get("buy_volume", 0)
+                sell_vol = trades_data.get("sell_volume", 0)
+                buy_count = trades_data.get("buy_count", 0)
+                sell_count = trades_data.get("sell_count", 0)
+
+                fig_bs = go.Figure()
+                fig_bs.add_trace(go.Bar(
+                    x=["Volume"], y=[buy_vol],
+                    name="Buy Volume", marker_color="#68d391",
+                ))
+                fig_bs.add_trace(go.Bar(
+                    x=["Volume"], y=[sell_vol],
+                    name="Sell Volume", marker_color="#fc8181",
+                ))
+                fig_bs.add_trace(go.Bar(
+                    x=["Trade Count"], y=[buy_count],
+                    name="Buy Trades", marker_color="#68d391", showlegend=False,
+                ))
+                fig_bs.add_trace(go.Bar(
+                    x=["Trade Count"], y=[sell_count],
+                    name="Sell Trades", marker_color="#fc8181", showlegend=False,
+                ))
+                fig_bs.update_layout(
+                    height=350,
+                    barmode="group",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                    yaxis_title="",
+                )
+                fig_bs.update_yaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
+                st.plotly_chart(fig_bs, use_container_width=True)
+
+                ratio = trades_data.get("buy_sell_ratio", 1.0)
+                buy_pct = trades_data.get("buy_pct", 50)
+                signal = "Bullish" if ratio > 1.1 else ("Bearish" if ratio < 0.9 else "Neutral")
+                st.caption(f"Buy/Sell Ratio: {ratio:.4f} ({buy_pct:.0f}% buys) — **{signal}**")
+            else:
+                error_msg = trades_data.get("error", "Unknown error") if isinstance(trades_data, dict) else "Unknown error"
+                st.info(f"Trade data unavailable: {error_msg}")
+
+        ind_col3, ind_col4 = st.columns(2)
+
+        # Spread History
+        with ind_col3:
+            st.markdown("##### Bid-Ask Spread History")
+            if isinstance(spread_data, dict) and "error" not in spread_data:
+                spread_df = spread_data.get("df", pd.DataFrame())
+                if not spread_df.empty:
+                    fig_spread = px.area(
+                        spread_df,
+                        x="timestamp",
+                        y="spread_bps",
+                        color_discrete_sequence=["#4299e1"],
+                    )
+                    fig_spread.update_layout(
                         height=350,
-                        barmode="stack",
                         plot_bgcolor="rgba(0,0,0,0)",
                         paper_bgcolor="rgba(0,0,0,0)",
-                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
                         xaxis_title="",
-                        yaxis_title="Volume (RLS)",
+                        yaxis_title="Spread (basis points)",
                     )
-                    fig_timeline.update_xaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
-                    fig_timeline.update_yaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
-                    st.plotly_chart(fig_timeline, use_container_width=True)
+                    fig_spread.update_xaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
+                    fig_spread.update_yaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
+                    st.plotly_chart(fig_spread, use_container_width=True)
+                    st.caption(f"Current: {spread_data.get('current_spread_bps', 0):.1f} bps | Avg: {spread_data.get('avg_spread_bps', 0):.1f} bps")
                 else:
-                    st.info("Not enough trade data for timeline.")
+                    st.info("No spread history data available.")
             else:
-                st.info("No trade data available.")
-        else:
-            error_msg = trades_data.get("error", "Unknown error") if isinstance(trades_data, dict) else "Unknown error"
-            st.info(f"Trade timeline unavailable: {error_msg}")
+                error_msg = spread_data.get("error", "Unknown error") if isinstance(spread_data, dict) else "Unknown error"
+                st.info(f"Spread data unavailable: {error_msg}")
 
-    st.markdown("<br>", unsafe_allow_html=True)
+        # Trade Timeline
+        with ind_col4:
+            st.markdown("##### Recent Trade Activity")
+            if isinstance(trades_data, dict) and "error" not in trades_data:
+                trade_df = trades_data.get("df", pd.DataFrame())
+                if not trade_df.empty:
+                    trade_df_copy = trade_df.copy()
+                    trade_df_copy = trade_df_copy.set_index("timestamp")
+                    hourly = trade_df_copy.groupby([pd.Grouper(freq="1h"), "side"])["volume"].sum().unstack(fill_value=0).reset_index()
 
-    # --- Market Signal Summary ---
-    st.markdown("#### Market Signal Summary")
-    signal_result = kraken_market.compute_market_signal(kraken_data)
-    overall = signal_result["overall_signal"]
-    score = signal_result["signal_score"]
-    factors = signal_result["factors"]
+                    if "buy" in hourly.columns or "sell" in hourly.columns:
+                        fig_timeline = go.Figure()
+                        if "buy" in hourly.columns:
+                            fig_timeline.add_trace(go.Bar(
+                                x=hourly["timestamp"], y=hourly["buy"],
+                                name="Buy Volume", marker_color="#68d391",
+                            ))
+                        if "sell" in hourly.columns:
+                            fig_timeline.add_trace(go.Bar(
+                                x=hourly["timestamp"], y=hourly["sell"],
+                                name="Sell Volume", marker_color="#fc8181",
+                            ))
+                        fig_timeline.update_layout(
+                            height=350,
+                            barmode="stack",
+                            plot_bgcolor="rgba(0,0,0,0)",
+                            paper_bgcolor="rgba(0,0,0,0)",
+                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                            xaxis_title="",
+                            yaxis_title="Volume",
+                        )
+                        fig_timeline.update_xaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
+                        fig_timeline.update_yaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
+                        st.plotly_chart(fig_timeline, use_container_width=True)
+                    else:
+                        st.info("Not enough trade data for timeline.")
+                else:
+                    st.info("No trade data available.")
+            else:
+                error_msg = trades_data.get("error", "Unknown error") if isinstance(trades_data, dict) else "Unknown error"
+                st.info(f"Trade timeline unavailable: {error_msg}")
 
-    signal_colors = {"Bullish": "#68d391", "Bearish": "#fc8181", "Neutral": "#ecc94b"}
-    signal_color = signal_colors.get(overall, "#ecc94b")
+        st.markdown("<br>", unsafe_allow_html=True)
 
-    st.markdown(f"""
-    <div class="metric-card" style="border-left: 4px solid {signal_color}; padding: 1.5rem;">
-        <div class="metric-label">OVERALL SIGNAL</div>
-        <div class="metric-value" style="color: {signal_color};">{overall}</div>
-        <div style="color: #cbd5e1; font-size: 1rem;">Score: {score:+.3f} (range: -1.0 bearish to +1.0 bullish)</div>
-    </div>
-    """, unsafe_allow_html=True)
+        # --- Market Signal Summary ---
+        st.markdown(f"#### {selected_token} Market Signal Summary")
+        signal_result = kraken_market.compute_market_signal(detail_data)
+        overall = signal_result["overall_signal"]
+        score = signal_result["signal_score"]
+        factors = signal_result["factors"]
 
-    if factors:
-        factors_df = pd.DataFrame(factors)
-        factors_df.columns = ["Factor", "Value", "Signal", "Weight", "Score"]
-        st.dataframe(factors_df, use_container_width=True, hide_index=True)
+        signal_colors = {"Bullish": "#68d391", "Bearish": "#fc8181", "Neutral": "#ecc94b"}
+        signal_color = signal_colors.get(overall, "#ecc94b")
 
-        if overall == "Bullish":
-            st.markdown("""
-            > **Interpretation:** The weighted market indicators lean bullish. Buying pressure exceeds selling pressure
-            > and order book support is strong. Monitor spread and volume for confirmation.
-            """)
-        elif overall == "Bearish":
-            st.markdown("""
-            > **Interpretation:** The weighted market indicators lean bearish. Selling pressure exceeds buying pressure
-            > and/or liquidity is thinning. Watch for support levels and volume changes.
-            """)
-        else:
-            st.markdown("""
-            > **Interpretation:** Market indicators are mixed with no strong directional bias.
-            > Market is in a consolidation phase. Watch for a breakout in either direction.
-            """)
+        st.markdown(f"""
+        <div class="metric-card" style="border-left: 4px solid {signal_color}; padding: 1.5rem;">
+            <div class="metric-label">OVERALL SIGNAL — {selected_token.upper()}</div>
+            <div class="metric-value" style="color: {signal_color};">{overall}</div>
+            <div style="color: #cbd5e1; font-size: 1rem;">Score: {score:+.3f} (range: -1.0 bearish to +1.0 bullish)</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        if factors:
+            factors_df = pd.DataFrame(factors)
+            factors_df.columns = ["Factor", "Value", "Signal", "Weight", "Score"]
+            st.dataframe(factors_df, use_container_width=True, hide_index=True)
+
+            if overall == "Bullish":
+                st.markdown("""
+                > **Interpretation:** The weighted market indicators lean bullish. Buying pressure exceeds selling pressure
+                > and order book support is strong. Monitor spread and volume for confirmation.
+                """)
+            elif overall == "Bearish":
+                st.markdown("""
+                > **Interpretation:** The weighted market indicators lean bearish. Selling pressure exceeds buying pressure
+                > and/or liquidity is thinning. Watch for support levels and volume changes.
+                """)
+            else:
+                st.markdown("""
+                > **Interpretation:** Market indicators are mixed with no strong directional bias.
+                > Market is in a consolidation phase. Watch for a breakout in either direction.
+                """)
 
 # Tab 7: Whale Tracker
 with tab7:

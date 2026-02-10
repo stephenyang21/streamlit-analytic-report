@@ -2,9 +2,19 @@ import requests
 import pandas as pd
 from datetime import datetime
 
-PAIR = "RLSUSD"
 BASE_URL = "https://api.kraken.com/0/public"
 TIMEOUT = 15
+
+# Tokens tracked on Kraken (name -> Kraken pair)
+KRAKEN_PAIRS = {
+    "Rayls": "RLSUSD",
+    "zkSync Era": "ZKUSD",
+    "Plume": "PLUMEUSD",
+    "Avalanche": "AVAXUSD",
+    "Ondo Finance": "ONDOUSD",
+    "Polygon": "POLUSD",
+    "Chainlink": "LINKUSD",
+}
 
 # Kraken OHLC interval mapping (in minutes)
 INTERVAL_MAP = {
@@ -16,12 +26,18 @@ INTERVAL_MAP = {
 }
 
 
-def get_ticker():
-    """Get 24hr ticker statistics for RLSUSD from Kraken."""
+def _get_pair_key(result):
+    """Extract the actual pair key from Kraken result (ignores 'last')."""
+    keys = [k for k in result.keys() if k != "last"]
+    return keys[0] if keys else None
+
+
+def get_ticker(pair="RLSUSD"):
+    """Get 24hr ticker statistics for a pair from Kraken."""
     try:
         resp = requests.get(
             f"{BASE_URL}/Ticker",
-            params={"pair": PAIR},
+            params={"pair": pair},
             timeout=TIMEOUT,
         )
         data = resp.json()
@@ -29,7 +45,6 @@ def get_ticker():
             return {"error": ", ".join(data["error"])}
 
         result = data["result"]
-        # Kraken returns the pair key which may vary (e.g. RLSUSD)
         pair_key = list(result.keys())[0]
         t = result[pair_key]
 
@@ -54,13 +69,13 @@ def get_ticker():
         return {"error": str(e)}
 
 
-def get_ohlc(interval="1d", limit=60):
-    """Get OHLC candlestick data for RLSUSD from Kraken."""
+def get_ohlc(pair="RLSUSD", interval="1d", limit=60):
+    """Get OHLC candlestick data for a pair from Kraken."""
     try:
         kraken_interval = INTERVAL_MAP.get(interval, 1440)
         resp = requests.get(
             f"{BASE_URL}/OHLC",
-            params={"pair": PAIR, "interval": kraken_interval},
+            params={"pair": pair, "interval": kraken_interval},
             timeout=TIMEOUT,
         )
         data = resp.json()
@@ -68,7 +83,9 @@ def get_ohlc(interval="1d", limit=60):
             return {"error": ", ".join(data["error"])}
 
         result = data["result"]
-        pair_key = [k for k in result.keys() if k != "last"][0]
+        pair_key = _get_pair_key(result)
+        if not pair_key:
+            return {"error": "No data in response"}
         raw = result[pair_key]
 
         rows = []
@@ -85,7 +102,6 @@ def get_ohlc(interval="1d", limit=60):
             })
 
         df = pd.DataFrame(rows)
-        # Kraken returns full history; trim to limit
         if len(df) > limit:
             df = df.tail(limit).reset_index(drop=True)
         return df
@@ -93,12 +109,12 @@ def get_ohlc(interval="1d", limit=60):
         return {"error": str(e)}
 
 
-def get_order_book(count=20):
-    """Get order book depth for RLSUSD from Kraken."""
+def get_order_book(pair="RLSUSD", count=20):
+    """Get order book depth for a pair from Kraken."""
     try:
         resp = requests.get(
             f"{BASE_URL}/Depth",
-            params={"pair": PAIR, "count": count},
+            params={"pair": pair, "count": count},
             timeout=TIMEOUT,
         )
         data = resp.json()
@@ -137,12 +153,12 @@ def get_order_book(count=20):
         return {"error": str(e)}
 
 
-def get_recent_trades():
-    """Get recent trades for RLSUSD from Kraken and compute buy/sell breakdown."""
+def get_recent_trades(pair="RLSUSD"):
+    """Get recent trades for a pair from Kraken and compute buy/sell breakdown."""
     try:
         resp = requests.get(
             f"{BASE_URL}/Trades",
-            params={"pair": PAIR},
+            params={"pair": pair},
             timeout=TIMEOUT,
         )
         data = resp.json()
@@ -150,7 +166,9 @@ def get_recent_trades():
             return {"error": ", ".join(data["error"])}
 
         result = data["result"]
-        pair_key = [k for k in result.keys() if k != "last"][0]
+        pair_key = _get_pair_key(result)
+        if not pair_key:
+            return {"error": "No data in response"}
         raw = result[pair_key]
 
         rows = []
@@ -189,12 +207,12 @@ def get_recent_trades():
         return {"error": str(e)}
 
 
-def get_spread_history():
-    """Get recent spread history for RLSUSD from Kraken."""
+def get_spread_history(pair="RLSUSD"):
+    """Get recent spread history for a pair from Kraken."""
     try:
         resp = requests.get(
             f"{BASE_URL}/Spread",
-            params={"pair": PAIR},
+            params={"pair": pair},
             timeout=TIMEOUT,
         )
         data = resp.json()
@@ -202,7 +220,9 @@ def get_spread_history():
             return {"error": ", ".join(data["error"])}
 
         result = data["result"]
-        pair_key = [k for k in result.keys() if k != "last"][0]
+        pair_key = _get_pair_key(result)
+        if not pair_key:
+            return {"error": "No data in response"}
         raw = result[pair_key]
 
         rows = []
@@ -229,14 +249,51 @@ def get_spread_history():
         return {"error": str(e)}
 
 
-def get_all_market_data():
-    """Fetch all Kraken market data for RLSUSD. Each key may independently contain 'error'."""
+def get_all_market_data(pair="RLSUSD"):
+    """Fetch all Kraken market data for a pair. Each key may independently contain 'error'."""
     return {
-        "ticker": get_ticker(),
-        "order_book": get_order_book(count=25),
-        "trades": get_recent_trades(),
-        "spread": get_spread_history(),
+        "ticker": get_ticker(pair),
+        "order_book": get_order_book(pair, count=25),
+        "trades": get_recent_trades(pair),
+        "spread": get_spread_history(pair),
     }
+
+
+def get_all_tickers():
+    """
+    Fetch ticker data for all tracked tokens.
+    Returns dict of {token_name: ticker_data} for tokens that are available.
+    Tokens that return errors are skipped.
+    """
+    results = {}
+    for name, pair in KRAKEN_PAIRS.items():
+        ticker = get_ticker(pair)
+        if isinstance(ticker, dict) and "error" not in ticker:
+            ticker["pair"] = pair
+            ticker["name"] = name
+            results[name] = ticker
+    return results
+
+
+def get_peer_comparison():
+    """
+    Fetch comparison data (ticker + order book) for all tracked tokens.
+    Returns dict of {token_name: {ticker, order_book}} for available tokens.
+    """
+    results = {}
+    for name, pair in KRAKEN_PAIRS.items():
+        ticker = get_ticker(pair)
+        if isinstance(ticker, dict) and "error" in ticker:
+            continue
+        book = get_order_book(pair, count=15)
+        trades = get_recent_trades(pair)
+        results[name] = {
+            "pair": pair,
+            "ticker": ticker,
+            "order_book": book if isinstance(book, dict) and "error" not in book else None,
+            "trades": trades if isinstance(trades, dict) and "error" not in trades else None,
+        }
+    return results
 
 
 def compute_market_signal(data):
@@ -314,13 +371,12 @@ def compute_market_signal(data):
     spread = data.get("spread", {})
     if isinstance(spread, dict) and "error" not in spread:
         avg_bps = spread.get("avg_spread_bps", 0)
-        # < 20 bps is tight (healthy/bullish), > 100 bps is wide (unhealthy/bearish)
         if avg_bps <= 20:
             score = 1.0
         elif avg_bps >= 100:
             score = -1.0
         else:
-            score = 1.0 - (avg_bps - 20) / 40  # linear scale
+            score = 1.0 - (avg_bps - 20) / 40
             score = max(min(score, 1.0), -1.0)
         signal = "Bullish" if score > 0.1 else ("Bearish" if score < -0.1 else "Neutral")
         factors.append({
