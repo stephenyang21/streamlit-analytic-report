@@ -1,8 +1,11 @@
+import logging
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
 from defillama_sdk import DefiLlama
+
+logging.basicConfig(level=logging.INFO)
 
 from metric import revenue
 from metric import price
@@ -10,6 +13,12 @@ from metric import holders
 from metric import analytics
 from metric import etherscan
 from metric import kraken_market
+from metric import db_cache
+
+try:
+    db_cache.initialize_tables()
+except Exception as e:
+    logging.warning(f"DB cache initialization failed, will use API directly: {e}")
 
 st.set_page_config(
     page_title="Rayls Token Analytics",
@@ -498,7 +507,7 @@ with tab1:
 
     st.dataframe(
         styled_df,
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         height=320,
         column_config={
@@ -629,7 +638,7 @@ with tab2:
 
     st.dataframe(
         styled_price_df,
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         column_config={
             "Project": st.column_config.TextColumn("Token", width="medium"),
@@ -786,7 +795,7 @@ with tab3:
                 gridcolor="rgba(128,128,128,0.2)",
             )
 
-            st.plotly_chart(fig_bar, use_container_width=True)
+            st.plotly_chart(fig_bar, width="stretch")
 
             # Bullet Chart - Rayls Multiple vs Peer Range
             st.markdown("<br>", unsafe_allow_html=True)
@@ -933,7 +942,7 @@ with tab3:
                 margin=dict(l=20, r=20, t=80, b=40)
             )
 
-            st.plotly_chart(fig_bullet, use_container_width=True)
+            st.plotly_chart(fig_bullet, width="stretch")
 
             # Add interpretation text
             if rayls_mult < peer_median_multiple:
@@ -1041,7 +1050,7 @@ with tab3:
                 margin=dict(l=20, r=80, t=60, b=40)
             )
 
-            st.plotly_chart(fig_diverging, use_container_width=True)
+            st.plotly_chart(fig_diverging, width="stretch")
 
             # Summary for diverging chart
             rayls_discount = diverging_data[diverging_data["Project"] == "Rayls (RLS)"]["Discount/Premium (%)"].values[0]
@@ -1167,7 +1176,7 @@ with tab3:
                     margin=dict(l=20, r=20, t=60, b=40)
                 )
 
-                st.plotly_chart(fig_price, use_container_width=True)
+                st.plotly_chart(fig_price, width="stretch")
 
                 # Price target summary table
                 col1, col2, col3 = st.columns(3)
@@ -1372,7 +1381,7 @@ with tab3:
                     ),
                 )
 
-                st.plotly_chart(fig_scatter, use_container_width=True)
+                st.plotly_chart(fig_scatter, width="stretch")
 
                 # Insight based on Rayls position
                 if len(rayls_scatter) > 0:
@@ -1547,7 +1556,7 @@ with tab3:
             gridcolor="rgba(128,128,128,0.2)"
         )
 
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
         # Data table for the chart
         st.markdown("<br>", unsafe_allow_html=True)
@@ -1571,7 +1580,7 @@ with tab3:
 
         st.dataframe(
             styled_valuation_df,
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             column_config={
                 "Project": st.column_config.TextColumn("Project", width="medium"),
@@ -1647,8 +1656,8 @@ with tab4:
 
     @st.cache_data(ttl=600)  # Cache for 10 minutes
     def load_holders_data():
-        """Load token holder data from Moralis API."""
-        return holders.get_all_token_holders_data()
+        """Load token holder data (DB cache -> Moralis API fallback)."""
+        return holders.get_all_token_holders_data_cached()
 
     with st.spinner("Loading token holder data from Moralis..."):
         holders_data = load_holders_data()
@@ -1743,7 +1752,7 @@ with tab4:
 
                 fig_dist.update_yaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
 
-                st.plotly_chart(fig_dist, use_container_width=True)
+                st.plotly_chart(fig_dist, width="stretch")
 
             with col2:
                 # Pie chart for holder distribution (excluding shrimps for better visibility)
@@ -1767,7 +1776,7 @@ with tab4:
                     paper_bgcolor="rgba(0,0,0,0)",
                 )
 
-                st.plotly_chart(fig_pie_dist, use_container_width=True)
+                st.plotly_chart(fig_pie_dist, width="stretch")
 
             # Distribution metrics
             col1, col2, col3, col4 = st.columns(4)
@@ -1824,7 +1833,7 @@ with tab4:
 
                 fig_conc.update_yaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)", range=[0, 110])
 
-                st.plotly_chart(fig_conc, use_container_width=True)
+                st.plotly_chart(fig_conc, width="stretch")
 
             with col2:
                 # Key concentration metrics
@@ -1926,7 +1935,7 @@ with tab4:
                 gridcolor="rgba(128,128,128,0.2)",
             )
 
-            st.plotly_chart(fig_holders, use_container_width=True)
+            st.plotly_chart(fig_holders, width="stretch")
 
         st.markdown("<br>", unsafe_allow_html=True)
 
@@ -2020,7 +2029,7 @@ with tab4:
                 bargap=0.3,
             )
 
-            st.plotly_chart(fig_stacked, use_container_width=True)
+            st.plotly_chart(fig_stacked, width="stretch")
 
         st.markdown("<br>", unsafe_allow_html=True)
 
@@ -2086,7 +2095,7 @@ with tab4:
                 ),
             )
 
-            st.plotly_chart(fig_heatmap, use_container_width=True)
+            st.plotly_chart(fig_heatmap, width="stretch")
 
         st.markdown("<br>", unsafe_allow_html=True)
 
@@ -2112,7 +2121,7 @@ with tab4:
 
         st.dataframe(
             display_holder_df[["Token", "Holders", "24h", "7d", "30d", "Contract"]],
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             column_config={
                 "Token": st.column_config.TextColumn("Token", width="medium"),
@@ -2136,8 +2145,8 @@ with tab5:
 
     @st.cache_data(ttl=600)  # Cache for 10 minutes
     def load_analytics_data():
-        """Load token analytics data from Moralis API."""
-        return analytics.get_all_token_analytics()
+        """Load token analytics data (DB cache -> Moralis API fallback)."""
+        return analytics.get_all_token_analytics_cached()
 
     with st.spinner("Loading token analytics data from Moralis..."):
         analytics_data = load_analytics_data()
@@ -2286,7 +2295,7 @@ with tab5:
                 yaxis=dict(tickfont=dict(size=12), tickprefix="$"),
             )
 
-            st.plotly_chart(fig_volume, use_container_width=True)
+            st.plotly_chart(fig_volume, width="stretch")
 
         st.markdown("<br>", unsafe_allow_html=True)
 
@@ -2343,7 +2352,7 @@ with tab5:
                     height=350,
                 )
 
-                st.plotly_chart(fig_norm_total, use_container_width=True)
+                st.plotly_chart(fig_norm_total, width="stretch")
 
             with col_norm2:
                 # Normalized 24h Buy Volume chart
@@ -2370,7 +2379,7 @@ with tab5:
                     height=350,
                 )
 
-                st.plotly_chart(fig_norm_24h, use_container_width=True)
+                st.plotly_chart(fig_norm_24h, width="stretch")
 
         st.markdown("<br>", unsafe_allow_html=True)
 
@@ -2402,7 +2411,7 @@ with tab5:
 
         st.dataframe(
             display_analytics_df[["Token", "Chain", "USD Price", "Liquidity", "Total Buy Vol", "24h Buy Vol", "24h Sell Vol", "24h Buyers", "24h Sellers", "24h Wallets", "24h Price %"]],
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             column_config={
                 "Token": st.column_config.TextColumn("Token", width="medium"),
@@ -2501,7 +2510,7 @@ with tab6:
 
         st.dataframe(
             comp_df,
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             column_config={
                 "Price (USD)": st.column_config.NumberColumn(format="$%.6f"),
@@ -2549,7 +2558,7 @@ with tab6:
             )
             fig_change.update_xaxes(showgrid=False)
             fig_change.update_yaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
-            st.plotly_chart(fig_change, use_container_width=True)
+            st.plotly_chart(fig_change, width="stretch")
 
         # Buy/Sell Ratio comparison
         with comp_chart_col2:
@@ -2576,7 +2585,7 @@ with tab6:
                 )
                 fig_bs_comp.update_xaxes(showgrid=False)
                 fig_bs_comp.update_yaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
-                st.plotly_chart(fig_bs_comp, use_container_width=True)
+                st.plotly_chart(fig_bs_comp, width="stretch")
             else:
                 st.info("No trade data available for comparison.")
 
@@ -2607,7 +2616,7 @@ with tab6:
                 )
                 fig_ob_comp.update_xaxes(showgrid=False)
                 fig_ob_comp.update_yaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
-                st.plotly_chart(fig_ob_comp, use_container_width=True)
+                st.plotly_chart(fig_ob_comp, width="stretch")
             else:
                 st.info("No order book data available for comparison.")
 
@@ -2634,7 +2643,7 @@ with tab6:
             )
             fig_sp_comp.update_xaxes(showgrid=False)
             fig_sp_comp.update_yaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
-            st.plotly_chart(fig_sp_comp, use_container_width=True)
+            st.plotly_chart(fig_sp_comp, width="stretch")
 
         st.markdown("<br>", unsafe_allow_html=True)
 
@@ -2746,7 +2755,7 @@ with tab6:
             )
             fig_candle.update_xaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
             fig_candle.update_yaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
-            st.plotly_chart(fig_candle, use_container_width=True)
+            st.plotly_chart(fig_candle, width="stretch")
         elif isinstance(klines_df, dict) and "error" in klines_df:
             st.warning(f"Unable to load OHLC data: {klines_df['error']}")
         else:
@@ -2800,7 +2809,7 @@ with tab6:
                 )
                 fig_depth.update_xaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
                 fig_depth.update_yaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
-                st.plotly_chart(fig_depth, use_container_width=True)
+                st.plotly_chart(fig_depth, width="stretch")
 
                 bid_pct = order_book.get("bid_pct", 50)
                 ask_pct = order_book.get("ask_pct", 50)
@@ -2846,7 +2855,7 @@ with tab6:
                     yaxis_title="",
                 )
                 fig_bs.update_yaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
-                st.plotly_chart(fig_bs, use_container_width=True)
+                st.plotly_chart(fig_bs, width="stretch")
 
                 ratio = trades_data.get("buy_sell_ratio", 1.0)
                 buy_pct = trades_data.get("buy_pct", 50)
@@ -2879,7 +2888,7 @@ with tab6:
                     )
                     fig_spread.update_xaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
                     fig_spread.update_yaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
-                    st.plotly_chart(fig_spread, use_container_width=True)
+                    st.plotly_chart(fig_spread, width="stretch")
                     st.caption(f"Current: {spread_data.get('current_spread_bps', 0):.1f} bps | Avg: {spread_data.get('avg_spread_bps', 0):.1f} bps")
                 else:
                     st.info("No spread history data available.")
@@ -2920,7 +2929,7 @@ with tab6:
                         )
                         fig_timeline.update_xaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
                         fig_timeline.update_yaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
-                        st.plotly_chart(fig_timeline, use_container_width=True)
+                        st.plotly_chart(fig_timeline, width="stretch")
                     else:
                         st.info("Not enough trade data for timeline.")
                 else:
@@ -2952,7 +2961,7 @@ with tab6:
         if factors:
             factors_df = pd.DataFrame(factors)
             factors_df.columns = ["Factor", "Value", "Signal", "Weight", "Score"]
-            st.dataframe(factors_df, use_container_width=True, hide_index=True)
+            st.dataframe(factors_df, width="stretch", hide_index=True)
 
             if overall == "Bullish":
                 st.markdown("""
@@ -3089,7 +3098,7 @@ with tab7:
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
             )
 
-            st.plotly_chart(fig_whale_flow, use_container_width=True)
+            st.plotly_chart(fig_whale_flow, width="stretch")
         else:
             st.info("No address flow data available.")
     else:
@@ -3105,7 +3114,7 @@ with tab7:
         whale_df = pd.DataFrame(whale_transfers_data)
         st.dataframe(
             whale_df,
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             column_config={
                 "hash": st.column_config.TextColumn("Tx Hash", width="medium"),
@@ -3206,7 +3215,7 @@ with tab7:
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, title=""),
                 )
                 fig_exchange.update_yaxes(showgrid=True, gridwidth=1, gridcolor="rgba(128,128,128,0.2)")
-                st.plotly_chart(fig_exchange, use_container_width=True)
+                st.plotly_chart(fig_exchange, width="stretch")
         else:
             st.info("No exchange flow data detected. This may indicate Rayls tokens are not actively traded on major centralized exchanges tracked.")
 
@@ -3229,7 +3238,7 @@ st.divider()
 
 col1, col2, col3 = st.columns([1, 1, 1])
 with col2:
-    if st.button("🔄 Refresh Data", use_container_width=True):
+    if st.button("🔄 Refresh Data", width="stretch"):
         st.cache_data.clear()
         st.rerun()
 

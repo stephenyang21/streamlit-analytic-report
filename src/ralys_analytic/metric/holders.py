@@ -120,3 +120,58 @@ def get_all_token_holders_data():
             }
 
     return results
+
+
+def get_all_token_holders_data_cached():
+    """
+    Cache-aware version of get_all_token_holders_data().
+    Returns data from PostgreSQL cache if < 6 hours old,
+    otherwise fetches from Moralis and updates cache.
+    """
+    from . import db_cache
+
+    results = {}
+    for token_name, token_info in TOKEN_CONTRACTS.items():
+        contract_address = token_info["address"]
+        chain = token_info.get("chain", "eth")
+
+        try:
+            raw = db_cache.get_or_fetch(
+                data_type="holders",
+                token_name=token_name,
+                contract_address=contract_address,
+                chain=chain,
+                fetch_fn=lambda ca=contract_address, ch=chain: get_token_holders_data(ca, ch),
+            )
+
+            if "error" in raw:
+                results[token_name] = {
+                    "contract_address": contract_address,
+                    "holder_count": None,
+                    "holder_change": None,
+                    "holder_supply": None,
+                    "holder_distribution": None,
+                    "holders_by_acquisition": None,
+                    "error": raw.get("error"),
+                }
+            else:
+                results[token_name] = {
+                    "contract_address": contract_address,
+                    "holder_count": raw.get("totalHolders"),
+                    "holder_change": raw.get("holderChange", {}),
+                    "holder_supply": raw.get("holderSupply", {}),
+                    "holder_distribution": raw.get("holderDistribution", {}),
+                    "holders_by_acquisition": raw.get("holdersByAcquisition", {}),
+                }
+        except Exception as e:
+            results[token_name] = {
+                "contract_address": contract_address,
+                "holder_count": None,
+                "holder_change": None,
+                "holder_supply": None,
+                "holder_distribution": None,
+                "holders_by_acquisition": None,
+                "error": str(e),
+            }
+
+    return results
