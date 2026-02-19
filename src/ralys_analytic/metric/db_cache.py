@@ -112,6 +112,24 @@ def update_cache(
         return False
 
 
+def get_cache_fetched_at(data_type: str, token_name: str) -> Optional[str]:
+    """Return the fetched_at ISO timestamp for a cached entry, or None if not found."""
+    query = """
+    SELECT fetched_at FROM api_cache
+    WHERE data_type = ? AND token_name = ?
+    LIMIT 1;
+    """
+    try:
+        conn = _get_connection()
+        cur = conn.execute(query, (data_type, token_name))
+        row = cur.fetchone()
+        conn.close()
+        return row[0] if row else None
+    except Exception as e:
+        logger.error(f"Cache fetched_at lookup failed for {data_type}/{token_name}: {e}")
+        return None
+
+
 def get_or_fetch(
     data_type: str,
     token_name: str,

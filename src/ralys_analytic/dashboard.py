@@ -260,7 +260,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Navigation tabs
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["📊 Project Comparison", "💹 Market Condition", "📈 Valuation Analysis", "👥 Token Holders", "📈 Token Analytics", "📈 Market Analytics", "🐋 Whale Tracker"])
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["📊 Project Comparison", "💹 Market Condition", "📈 Valuation Analysis", "👥 Token Holders", "💱 Token Analytics", "🏪 Market Analytics", "🐋 Whale Tracker"])
 
 
 @st.cache_data(ttl=300)  # Cache for 5 minutes
@@ -374,6 +374,10 @@ def load_data():
     return pd.DataFrame(results)
 
 
+# Track first load time for freshness indicator
+if "last_refresh" not in st.session_state:
+    st.session_state.last_refresh = datetime.now()
+
 # Load data
 with st.spinner("Loading data from APIs..."):
     df = load_data()
@@ -440,6 +444,34 @@ def get_change_badge(val):
     return f'<span class="change-badge {css_class}">{sign}{val:.2f}%</span>'
 
 
+def render_cache_notice(data_type: str, token_name: str = "Rayls (RLS)"):
+    """Display a cache-age notice for Moralis-backed data (6-hour TTL)."""
+    try:
+        fetched_at_str = db_cache.get_cache_fetched_at(data_type, token_name)
+        if fetched_at_str:
+            fetched_dt = datetime.fromisoformat(fetched_at_str)
+            # Normalise to naive UTC for arithmetic
+            if fetched_dt.tzinfo is not None:
+                fetched_dt = fetched_dt.replace(tzinfo=None)
+            elapsed = datetime.utcnow() - fetched_dt
+            total_sec = int(elapsed.total_seconds())
+            hours, remainder = divmod(total_sec, 3600)
+            minutes = remainder // 60
+            if hours > 0:
+                age_str = f"{hours}h {minutes}m ago"
+            else:
+                age_str = f"{minutes}m ago"
+            fetched_label = fetched_dt.strftime("%Y-%m-%d %H:%M UTC")
+            st.caption(
+                f"ℹ️ This data is cached for up to **6 hours** and refreshed automatically. "
+                f"Last fetched: **{age_str}** ({fetched_label})"
+            )
+        else:
+            st.caption("ℹ️ This data is cached for up to **6 hours** and refreshed automatically. Fetch time unavailable.")
+    except Exception:
+        st.caption("ℹ️ This data is cached for up to **6 hours** and refreshed automatically.")
+
+
 # Tab 1: Project Comparison
 with tab1:
     # Rayls highlight section
@@ -489,11 +521,12 @@ with tab1:
     st.markdown('<div class="section-header">All Projects Comparison</div>', unsafe_allow_html=True)
 
     # Create formatted display dataframe (exclude revenue growth columns)
-    display_cols = ["Project", "Current Price ($)", "Token Supply", "FDV ($)", "Revenue 2025 ($)",
+    display_cols = ["Project", "Current Price ($)", "Token Supply", "Market Cap ($)", "FDV ($)", "Revenue 2025 ($)",
                     "Multiplier (FDV/Revenue)", "Change 24h (%)", "Change 7d (%)", "Change 30d (%)"]
     display_df = df[display_cols].copy()
     display_df["Current Price ($)"] = df["Current Price ($)"].apply(lambda x: f"${x:,.6f}" if x and not pd.isna(x) else "N/A")
     display_df["Token Supply"] = df["Token Supply"].apply(format_supply)
+    display_df["Market Cap ($)"] = df["Market Cap ($)"].apply(format_currency)
     display_df["FDV ($)"] = df["FDV ($)"].apply(format_currency)
     display_df["Revenue 2025 ($)"] = df["Revenue 2025 ($)"].apply(format_currency)
     display_df["Multiplier (FDV/Revenue)"] = df["Multiplier (FDV/Revenue)"].apply(format_multiplier)
@@ -514,6 +547,7 @@ with tab1:
             "Project": st.column_config.TextColumn("Project", width="medium"),
             "Current Price ($)": st.column_config.TextColumn("Price", width="small"),
             "Token Supply": st.column_config.TextColumn("Supply", width="small"),
+            "Market Cap ($)": st.column_config.TextColumn("Mkt Cap", width="small"),
             "FDV ($)": st.column_config.TextColumn("FDV", width="small"),
             "Revenue 2025 ($)": st.column_config.TextColumn("Revenue '25", width="small"),
             "Multiplier (FDV/Revenue)": st.column_config.TextColumn("Multiplier", width="small"),
@@ -1413,7 +1447,7 @@ with tab3:
     - **Bubble size**: Market capitalization
     - **Quadrants**: Lower-right = "cheap growth" opportunities (high growth, low multiple)
 
-    *Note: Rayls uses peer average growth rate since historical revenue data is not available.*
+    *Note: Rayls historical revenue data is not available. Use the slider below to model different growth scenarios.*
     """)
 
     # Select growth period first
@@ -1433,10 +1467,29 @@ with tab3:
         (df["Market Cap ($)"].notna())
     ].copy()
 
-    # Rayls hardcoded growth rates
-    RAYLS_GROWTH_30D = 5.0  # 5% for 30 days
-    RAYLS_GROWTH_90D = 2.0  # 2% for 90 days
-    rayls_growth = RAYLS_GROWTH_30D if growth_period == "30 Days" else RAYLS_GROWTH_90D
+    # Rayls growth rate slider (no historical data available)
+    if growth_period == "30 Days":
+        rayls_growth = st.slider(
+            "Rayls Estimated Revenue Growth (30 Days) %",
+            min_value=-50.0,
+            max_value=100.0,
+            value=5.0,
+            step=0.5,
+            format="%.1f%%",
+            key="rayls_growth_30d",
+            help="Adjust Rayls' estimated 30-day revenue growth rate to model different scenarios."
+        )
+    else:
+        rayls_growth = st.slider(
+            "Rayls Estimated Revenue Growth (90 Days) %",
+            min_value=-50.0,
+            max_value=100.0,
+            value=2.0,
+            step=0.5,
+            format="%.1f%%",
+            key="rayls_growth_90d",
+            help="Adjust Rayls' estimated 90-day revenue growth rate to model different scenarios."
+        )
 
     # Get Rayls data
     rayls_df = df[
@@ -1445,7 +1498,7 @@ with tab3:
         (df["Market Cap ($)"].notna())
     ].copy()
 
-    # Set Rayls growth to hardcoded values
+    # Set Rayls growth to user-specified value
     if len(rayls_df) > 0:
         rayls_df[growth_col] = rayls_growth
         rayls_df["Growth Source"] = "Estimated"
@@ -1459,7 +1512,7 @@ with tab3:
 
     if len(chart_df) > 0:
         # Show Rayls growth info
-        st.info(f"**Rayls Revenue Growth ({growth_period}):** {rayls_growth:+.2f}% (estimated)")
+        st.info(f"**Rayls Revenue Growth ({growth_period}):** {rayls_growth:+.2f}% (user-defined scenario)")
 
         # Create bubble chart
         fig = px.scatter(
@@ -1661,6 +1714,8 @@ with tab4:
 
     with st.spinner("Loading token holder data from Moralis..."):
         holders_data = load_holders_data()
+
+    render_cache_notice("holders")
 
     if holders_data:
         # Rayls highlight section
@@ -2151,6 +2206,8 @@ with tab5:
     with st.spinner("Loading token analytics data from Moralis..."):
         analytics_data = load_analytics_data()
 
+    render_cache_notice("analytics")
+
     if analytics_data:
         # Rayls highlight section
         rayls_analytics = analytics_data.get("Rayls (RLS)", {})
@@ -2221,6 +2278,110 @@ with tab5:
                 label="24h Sell Transactions",
                 value=f"{sells.get('24h', 0):,}" if sells.get('24h') else "0"
             )
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Multi-period activity charts for Rayls
+        st.markdown('<div class="section-header">Rayls Multi-Period Activity</div>', unsafe_allow_html=True)
+        st.markdown("Buy/sell volume, wallet activity, and price momentum broken down across all available time windows.")
+
+        periods = ["5m", "1h", "6h", "24h"]
+
+        buy_vol   = rayls_analytics.get("total_buy_volume", {}) or {}
+        sell_vol  = rayls_analytics.get("total_sell_volume", {}) or {}
+        buyers    = rayls_analytics.get("total_buyers", {}) or {}
+        sellers   = rayls_analytics.get("total_sellers", {}) or {}
+        price_chg = rayls_analytics.get("price_percent_change", {}) or {}
+
+        mp_col1, mp_col2 = st.columns(2)
+
+        with mp_col1:
+            # Buy vs Sell Volume by period
+            import plotly.graph_objects as go
+            buy_vals  = [buy_vol.get(p, 0) or 0 for p in periods]
+            sell_vals = [sell_vol.get(p, 0) or 0 for p in periods]
+
+            fig_vol_mp = go.Figure()
+            fig_vol_mp.add_trace(go.Bar(
+                x=periods, y=buy_vals,
+                name="Buy Volume",
+                marker_color="#22c55e",
+                text=[f"${v:,.2f}" for v in buy_vals],
+                textposition="outside",
+            ))
+            fig_vol_mp.add_trace(go.Bar(
+                x=periods, y=sell_vals,
+                name="Sell Volume",
+                marker_color="#ef4444",
+                text=[f"${v:,.2f}" for v in sell_vals],
+                textposition="outside",
+            ))
+            fig_vol_mp.update_layout(
+                title=dict(text="Buy vs Sell Volume by Period", font=dict(size=15)),
+                barmode="group",
+                height=350,
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+                yaxis=dict(tickprefix="$", showgrid=True, gridcolor="rgba(128,128,128,0.2)"),
+                xaxis_title="Period",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            )
+            st.plotly_chart(fig_vol_mp, width="stretch")
+
+        with mp_col2:
+            # Buyers vs Sellers by period
+            buyer_vals  = [buyers.get(p, 0) or 0 for p in periods]
+            seller_vals = [sellers.get(p, 0) or 0 for p in periods]
+
+            fig_bs_mp = go.Figure()
+            fig_bs_mp.add_trace(go.Bar(
+                x=periods, y=buyer_vals,
+                name="Buyers",
+                marker_color="#22c55e",
+                text=[str(v) for v in buyer_vals],
+                textposition="outside",
+            ))
+            fig_bs_mp.add_trace(go.Bar(
+                x=periods, y=seller_vals,
+                name="Sellers",
+                marker_color="#ef4444",
+                text=[str(v) for v in seller_vals],
+                textposition="outside",
+            ))
+            fig_bs_mp.update_layout(
+                title=dict(text="Buyers vs Sellers by Period", font=dict(size=15)),
+                barmode="group",
+                height=350,
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+                yaxis=dict(showgrid=True, gridcolor="rgba(128,128,128,0.2)"),
+                xaxis_title="Period",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            )
+            st.plotly_chart(fig_bs_mp, width="stretch")
+
+        # Price % change across periods — full width
+        price_vals = [price_chg.get(p, 0) or 0 for p in periods]
+        bar_colors = ["#22c55e" if v >= 0 else "#ef4444" for v in price_vals]
+
+        fig_price_mp = go.Figure(go.Bar(
+            x=periods,
+            y=price_vals,
+            marker_color=bar_colors,
+            text=[f"{v:+.2f}%" for v in price_vals],
+            textposition="outside",
+        ))
+        fig_price_mp.add_hline(y=0, line_dash="dash", line_color="white", opacity=0.3)
+        fig_price_mp.update_layout(
+            title=dict(text="Price % Change by Period", font=dict(size=15)),
+            height=300,
+            plot_bgcolor="rgba(0,0,0,0)",
+            paper_bgcolor="rgba(0,0,0,0)",
+            xaxis_title="Period",
+            yaxis=dict(ticksuffix="%", showgrid=True, gridcolor="rgba(128,128,128,0.2)"),
+            showlegend=False,
+        )
+        st.plotly_chart(fig_price_mp, width="stretch")
 
         st.markdown("<br>", unsafe_allow_html=True)
 
@@ -3238,8 +3399,15 @@ st.divider()
 
 col1, col2, col3 = st.columns([1, 1, 1])
 with col2:
+    elapsed_sec = int((datetime.now() - st.session_state.last_refresh).total_seconds())
+    if elapsed_sec < 60:
+        freshness_str = f"{elapsed_sec}s ago"
+    else:
+        freshness_str = f"{elapsed_sec // 60}m {elapsed_sec % 60}s ago"
+    st.caption(f"Last updated: {freshness_str}")
     if st.button("🔄 Refresh Data", width="stretch"):
         st.cache_data.clear()
+        st.session_state.last_refresh = datetime.now()
         st.rerun()
 
 st.markdown("""
