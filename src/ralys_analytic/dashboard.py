@@ -1707,7 +1707,7 @@ with tab4:
     Track token holder metrics across Ethereum mainnet. Data powered by **Moralis API**.
     """)
 
-    @st.cache_data(ttl=600)  # Cache for 10 minutes
+    @st.cache_data(ttl=21600)  # Match 6-hour DB cache TTL — re-executing sooner returns stale data anyway
     def load_holders_data():
         """Load token holder data (DB cache -> Moralis API fallback)."""
         return holders.get_all_token_holders_data_cached()
@@ -2198,7 +2198,7 @@ with tab5:
     Track token trading metrics including buy/sell volume, unique wallets, and price changes. Data powered by **Moralis API**.
     """)
 
-    @st.cache_data(ttl=600)  # Cache for 10 minutes
+    @st.cache_data(ttl=21600)  # Match 6-hour DB cache TTL — re-executing sooner returns stale data anyway
     def load_analytics_data():
         """Load token analytics data (DB cache -> Moralis API fallback)."""
         return analytics.get_all_token_analytics_cached()
@@ -3164,6 +3164,16 @@ with tab7:
     # Section 1: Accumulation Score
     if isinstance(accumulation_data, dict) and "error" not in accumulation_data:
         st.markdown('<div class="section-header">Whale Accumulation Indicator (7 Days)</div>', unsafe_allow_html=True)
+        st.markdown("""
+        This indicator identifies the **top 20 wallets by trading volume** over the last 7 days and classifies
+        each as **Accumulating**, **Distributing**, or **Neutral** based on whether they received more tokens
+        than they sent (net inflow) or vice versa.
+
+        - **Accumulation Score** ranges from **-1.0** (all top wallets distributing) to **+1.0** (all accumulating). Scores above +0.2 are considered Bullish; below -0.2 are Bearish.
+        - **Accumulating wallets** are buying/holding — net token inflow over the period.
+        - **Distributing wallets** are selling/sending — net token outflow over the period.
+        - The **bar chart below** shows each wallet's net flow: positive (green) = accumulating, negative (red) = distributing.
+        """)
 
         score = accumulation_data.get("score", 0)
         acc_count = accumulation_data.get("accumulating_count", 0)

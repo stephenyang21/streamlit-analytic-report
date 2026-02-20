@@ -10,7 +10,7 @@ from .holders import TOKEN_CONTRACTS
 load_dotenv()
 
 # Etherscan API V2 base URL
-ETHERSCAN_API_URL = "https://api.etherscan.io/v2"
+ETHERSCAN_API_URL = "https://api.etherscan.io/v2/api"
 
 # Known exchange hot wallet addresses (lowercase)
 KNOWN_EXCHANGE_ADDRESSES = {
